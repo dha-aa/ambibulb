@@ -1,0 +1,18 @@
+{
+  "bulbs": [
+    {
+      "name": "Living Room",
+      "id": "REPLACE_WITH_DEVICE_ID",
+      "key": "REPLACE_WITH_LOCAL_KEY",
+      "ip": "192.168.1.50",
+      "version": 3.3
+    },
+    {
+      "name": "Bedroom",
+      "id": "REPLACE_WITH_DEVICE_ID_2",
+      "key": "REPLACE_WITH_LOCAL_KEY_2",
+      "ip": "Auto",
+      "version": 3.4
+    }
+  ]
+}

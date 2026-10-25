@@ -1,0 +1,21 @@
+# Secrets -- these hold your bulbs' local keys / Tuya API credentials. Never commit.
+bulbs.json
+devices.json
+snapshot.json
+tuya-raw.json
+tinytuya.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
