@@ -101,6 +101,7 @@ python3 -m ambibulb run ...            # same, without the console script
 | `--smooth F` | easing toward the new color (lower = calmer) |
 | `--cut N` | per-channel jump that snaps instantly (scene cut) |
 | `--no-letterbox` | don't auto-crop black movie bars |
+| `--gamut none\|p3` | `p3` converts wide-gamut (Display P3) capture to sRGB for truer hue on macOS P3 screens |
 | `--seconds N` | run N seconds then stop (0 = until Ctrl-C) |
 | `--temp warm\|neutral\|cool` | white temperature for `studio` mode (default warm) |
 
@@ -109,6 +110,19 @@ python3 -m ambibulb run ...            # same, without the console script
 `ambibulb studio` sets all bulbs to a steady white — normal room light, no
 screen sync. Use `--temp warm|neutral|cool` and `--brightness N`. It applies
 once and exits; the bulbs hold that state until you change it.
+
+### Wide-gamut (P3) displays
+
+macOS wide-gamut screens (MacBook Air/Pro, Studio Display) capture pixels in
+**Display P3**. By default ambibulb uses them as-is (colors read slightly
+punchier). Add `--gamut p3` to convert P3 → sRGB first for truer hue:
+
+```bash
+ambibulb run --preset anime --gamut p3
+```
+
+Grey/white are unchanged; saturated colors are mapped into sRGB. It's opt-in
+because the bulbs are uncalibrated anyway, so the difference is subtle.
 
 `--zones 3` assumes your bulbs are placed left / center / right; config order
 (bulb #1, #2, #3) maps left→right. Otherwise use `--zones 1`.

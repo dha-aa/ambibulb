@@ -75,6 +75,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "vivid = dominant hue (best for anime/animation)")
     g.add_argument("--no-letterbox", action="store_true",
                    help="don't auto-crop black movie bars")
+    g.add_argument("--gamut", choices=("none", "p3"), default="none",
+                   help="p3 = convert wide-gamut (Display P3) capture to sRGB "
+                        "for truer hue on macOS P3 screens. Default: none")
 
     g = p.add_argument_group("color")
     g.add_argument("--saturation", type=float, default=None)
@@ -121,6 +124,7 @@ def _capture_opts(a: argparse.Namespace) -> CaptureOptions:
         zones=max(1, a.zones),
         method=_MODE_TO_METHOD[a.mode],
         letterbox=not a.no_letterbox,
+        gamut=a.gamut,
     )
 
 

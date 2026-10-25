@@ -91,6 +91,39 @@ def trim_letterbox(img: "Image.Image", thresh: int = 20) -> "Image.Image":
 METHODS = ("average", "vibrance", "vivid")
 
 
+# --------------------------------------------------------------------------- #
+# Display-P3 -> sRGB (opt-in; macOS wide-gamut screens capture P3-encoded px)
+# --------------------------------------------------------------------------- #
+def _srgb_to_linear(c: float) -> float:
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def _linear_to_srgb(c: float) -> float:
+    c = min(1.0, max(0.0, c))
+    return c * 12.92 if c <= 0.0031308 else 1.055 * (c ** (1 / 2.4)) - 0.055
+
+
+#: 0..255 sRGB/P3-encoded value -> linear (precomputed; both use the sRGB curve)
+_LIN_LUT = [_srgb_to_linear(i / 255.0) for i in range(256)]
+
+#: Display-P3 (linear) -> sRGB (linear), D65. Standard color-science matrix.
+_P3_TO_SRGB = (
+    (1.2249401, -0.2249404, 0.0000000),
+    (-0.0420569, 1.0420571, 0.0000000),
+    (-0.0196376, -0.0786361, 1.0982735),
+)
+
+
+def p3_to_srgb(rgb: RGB) -> RGB:
+    """Convert one Display-P3-encoded pixel to sRGB (gamma-correct)."""
+    rl, gl, bl = _LIN_LUT[rgb[0]], _LIN_LUT[rgb[1]], _LIN_LUT[rgb[2]]
+    m = _P3_TO_SRGB
+    r = _linear_to_srgb(m[0][0] * rl + m[0][1] * gl + m[0][2] * bl)
+    g = _linear_to_srgb(m[1][0] * rl + m[1][1] * gl + m[1][2] * bl)
+    b = _linear_to_srgb(m[2][0] * rl + m[2][1] * gl + m[2][2] * bl)
+    return (round(r * 255), round(g * 255), round(b * 255))
+
+
 def _plain(pixels: list[RGB]) -> RGB:
     n = len(pixels) or 1
     r = sum(p[0] for p in pixels)
@@ -155,16 +188,18 @@ def _vivid(pixels: list[RGB], bins: int = 24) -> RGB:
 _REDUCERS = {"average": _plain, "vibrance": _vibrance, "vivid": _vivid}
 
 
-def zone_colors(img: "Image.Image", zones: int, method: str = "average"
-                ) -> list[RGB]:
+def zone_colors(img: "Image.Image", zones: int, method: str = "average",
+                gamut: str = "none") -> list[RGB]:
     """One representative color per horizontal zone (left -> right).
 
     method: 'average' (plain mix), 'vibrance' (saturation-weighted, general
-    video), or 'vivid' (dominant hue, best for anime/animation). Runs on a tiny
-    thumbnail, so it stays cheap.
+    video), or 'vivid' (dominant hue, best for anime/animation).
+    gamut: 'p3' converts captured Display-P3 pixels to sRGB first; 'none' uses
+    raw pixels. Runs on a tiny thumbnail, so it stays cheap.
     """
     zones = max(1, zones)
     reduce = _REDUCERS.get(method, _plain)
+    convert = gamut == "p3"
     cells, rows = 12, 10
     small = img.resize((zones * cells, rows), Image.BILINEAR).convert("RGB")
     px = small.load()
@@ -173,6 +208,8 @@ def zone_colors(img: "Image.Image", zones: int, method: str = "average"
         x0 = z * cells
         pixels = [px[xx, yy] for xx in range(x0, x0 + cells)
                   for yy in range(rows)]
+        if convert:
+            pixels = [p3_to_srgb(p) for p in pixels]
         out.append(reduce(pixels))
     return out
 

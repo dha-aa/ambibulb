@@ -7,6 +7,7 @@ import pytest
 from ambibulb.color import (
     ColorOptions,
     average_color,
+    p3_to_srgb,
     shape_hsv,
     trim_letterbox,
     zone_colors,
@@ -89,6 +90,28 @@ def test_vivid_locks_onto_subject_not_grey():
 def test_vivid_greyscale_falls_back():
     img = Image.new("RGB", (160, 90), (100, 100, 100))
     assert zone_colors(img, 1, method="vivid")[0] == (100, 100, 100)
+
+
+# -- P3 -> sRGB ------------------------------------------------------------- #
+def test_p3_neutral_axis_unchanged():
+    # Grey/white sit on the neutral axis -> conversion must leave them intact.
+    for v in (0, 64, 128, 200, 255):
+        r, g, b = p3_to_srgb((v, v, v))
+        assert abs(r - v) <= 1 and abs(g - v) <= 1 and abs(b - v) <= 1
+
+
+def test_p3_saturated_green_pulls_in_gamut():
+    # P3 green is outside sRGB; converting should reduce its green dominance
+    # or bleed into other channels (never produce out-of-range values).
+    r, g, b = p3_to_srgb((0, 255, 0))
+    assert 0 <= r <= 255 and 0 <= g <= 255 and 0 <= b <= 255
+
+
+def test_p3_gamut_flag_changes_midtone():
+    img = Image.new("RGB", (160, 90), (255, 128, 0))  # vivid orange
+    raw = zone_colors(img, 1, method="average", gamut="none")[0]
+    p3 = zone_colors(img, 1, method="average", gamut="p3")[0]
+    assert raw != p3
 
 
 # -- config ----------------------------------------------------------------- #

@@ -17,6 +17,7 @@ class CaptureOptions:
     zones: int = 1
     method: str = "average"              # average | vibrance | vivid
     letterbox: bool = True               # auto-crop black bars
+    gamut: str = "none"                  # 'p3' to convert P3 capture -> sRGB
 
 
 class ScreenSampler:
@@ -42,7 +43,8 @@ class ScreenSampler:
             img = color.Image.frombytes("RGB", shot.size, shot.rgb)
             if self.opts.letterbox:
                 img = color.trim_letterbox(img)
-            return color.zone_colors(img, zones, self.opts.method)
+            return color.zone_colors(img, zones, self.opts.method,
+                                     self.opts.gamut)
         c = color.average_color(shot.bgra, shot.width, shot.height, step=8)
         return [c] * zones
 
