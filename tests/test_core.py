@@ -6,12 +6,16 @@ import pytest
 
 from ambibulb.color import (
     ColorOptions,
+    HueStabilizer,
     average_color,
     p3_to_srgb,
     shape_hsv,
     trim_letterbox,
     zone_colors,
 )
+
+RED = (230, 20, 20)
+GREEN = (20, 230, 20)
 from ambibulb.config import ConfigError, load_bulbs
 
 PIL = pytest.importorskip("PIL")
@@ -112,6 +116,36 @@ def test_p3_gamut_flag_changes_midtone():
     raw = zone_colors(img, 1, method="average", gamut="none")[0]
     p3 = zone_colors(img, 1, method="average", gamut="p3")[0]
     assert raw != p3
+
+
+# -- hue stability ---------------------------------------------------------- #
+def _hue_of(rgb):
+    import colorsys
+    return colorsys.rgb_to_hsv(*(c / 255 for c in rgb))[0]
+
+
+def test_hue_stabilizer_ignores_single_blip():
+    s = HueStabilizer(hold=3)
+    for _ in range(4):
+        s.update(RED)
+    out = s.update(GREEN)          # one green frame in a sea of red
+    assert _hue_of(out) == pytest.approx(_hue_of(RED), abs=0.05)
+
+
+def test_hue_stabilizer_adopts_sustained_change():
+    s = HueStabilizer(hold=3)
+    for _ in range(4):
+        s.update(RED)
+    for _ in range(3):             # green holds for `hold` frames
+        out = s.update(GREEN)
+    assert _hue_of(out) == pytest.approx(_hue_of(GREEN), abs=0.05)
+
+
+def test_hue_stabilizer_passes_brightness_through():
+    s = HueStabilizer(hold=3)
+    s.update((230, 20, 20))
+    out = s.update((120, 10, 10))  # same hue, dimmer
+    assert max(out) < 160          # value tracked down immediately
 
 
 # -- config ----------------------------------------------------------------- #

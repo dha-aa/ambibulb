@@ -29,19 +29,21 @@ log = logging.getLogger("ambibulb")
 BASE = {
     "mode": "average", "zones": 1, "saturation": 1.0, "brightness": 100,
     "smooth": 0.4, "min_delta": 8, "cut": 120, "bulb_rate": 12, "fps": 15,
+    "hue_hold": 0,
 }
 PRESETS = {
     "default": {},
     # Anime/animation: flat vivid fields + fast cuts -> lock onto the dominant
-    # hue, punch the saturation, react snappy, push at the firmware ceiling.
+    # hue, punch the saturation, react snappy, push at the firmware ceiling,
+    # and damp hue flicker on busy frames.
     "anime": {"mode": "vivid", "saturation": 1.3, "smooth": 0.8, "min_delta": 4,
-              "cut": 70, "bulb_rate": 15, "fps": 24},
+              "cut": 70, "bulb_rate": 15, "fps": 24, "hue_hold": 3},
     # Live-action film: smoother, truer color, gentler cuts.
     "movie": {"mode": "vibrance", "saturation": 1.05, "smooth": 0.25,
-              "min_delta": 6, "cut": 120},
+              "min_delta": 6, "cut": 120, "hue_hold": 2},
     # Games: vivid and snappy like anime but slightly calmer saturation.
     "game": {"mode": "vivid", "saturation": 1.15, "smooth": 0.8, "min_delta": 4,
-             "cut": 60, "bulb_rate": 15, "fps": 24},
+             "cut": 60, "bulb_rate": 15, "fps": 24, "hue_hold": 2},
 }
 _MODE_TO_METHOD = {"average": "average", "dominant": "vibrance", "vivid": "vivid"}
 
@@ -97,6 +99,9 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--smooth", type=float, default=None)
     g.add_argument("--min-delta", type=int, default=None)
     g.add_argument("--cut", type=int, default=None, help="scene-cut snap threshold")
+    g.add_argument("--hue-hold", type=int, default=None,
+                   help="frames a new hue must persist before the bulb switches "
+                        "to it (anti-flicker; 0 = off)")
     g.add_argument("--seconds", type=float, default=0.0,
                    help="run for N seconds then stop (0 = until Ctrl-C)")
     return p
@@ -153,7 +158,8 @@ def _make_engine(a: argparse.Namespace) -> AmbientEngine:
         bulbs=bulbs, sampler=sampler,
         color_opts=_color_opts(a),
         engine_opts=EngineOptions(fps=a.fps, smooth=min(1.0, max(0.01, a.smooth)),
-                                  min_delta=a.min_delta, cut=a.cut),
+                                  min_delta=a.min_delta, cut=a.cut,
+                                  hue_hold=a.hue_hold),
         zones=max(1, a.zones),
     )
     return engine

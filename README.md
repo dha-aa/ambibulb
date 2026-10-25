@@ -82,7 +82,7 @@ python3 -m ambibulb run ...            # same, without the console script
 
 | Preset | Tuned for | Sets |
 |---|---|---|
-| `anime` | animation — flat vivid colors, fast cuts | `vivid` mode, high saturation, snappy, low cut, rate 15, fps 24 |
+| `anime` | animation — flat vivid colors, fast cuts | `vivid` mode, high saturation, snappy, low cut, rate 15, fps 24, hue-stability on |
 | `movie` | live-action film | `vibrance` mode, gentle smoothing, truer color |
 | `game` | games | vivid + snappy, slightly calmer saturation |
 | `default` | general desktop | plain average, calm |
@@ -100,6 +100,7 @@ python3 -m ambibulb run ...            # same, without the console script
 | `--bulb-rate N` | commands/sec per bulb (firmware tops out ~12–15) |
 | `--smooth F` | easing toward the new color (lower = calmer) |
 | `--cut N` | per-channel jump that snaps instantly (scene cut) |
+| `--hue-hold N` | frames a new hue must persist before switching (anti-flicker; 0 = off) |
 | `--no-letterbox` | don't auto-crop black movie bars |
 | `--gamut none\|p3` | `p3` converts wide-gamut (Display P3) capture to sRGB for truer hue on macOS P3 screens |
 | `--seconds N` | run N seconds then stop (0 = until Ctrl-C) |

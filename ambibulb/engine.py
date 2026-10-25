@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from .bulb import Bulb
 from .capture import ScreenSampler
-from .color import ColorOptions, shape_hsv
+from .color import ColorOptions, HueStabilizer, shape_hsv
 
 log = logging.getLogger("ambibulb.engine")
 
@@ -20,6 +20,7 @@ class EngineOptions:
     smooth: float = 0.4       # easing 0..1 toward the new color per frame
     min_delta: int = 8        # only push when the eased color moves this much
     cut: int = 120            # per-channel jump above this snaps (scene cut)
+    hue_hold: int = 0         # frames a new hue must hold before adopting (0=off)
 
 
 class AmbientEngine:
@@ -60,6 +61,8 @@ class AmbientEngine:
         n = len(self.bulbs)
         cur = [[0.0, 0.0, 0.0] for _ in range(n)]
         last_pushed: list[tuple[int, int, int] | None] = [None] * n
+        stab = ([HueStabilizer(self.opts.hue_hold) for _ in range(n)]
+                if self.opts.hue_hold > 0 else None)
         interval = 1.0 / max(1, self.opts.fps)
         deadline = time.time() + seconds if seconds > 0 else None
 
@@ -70,6 +73,8 @@ class AmbientEngine:
             zc = self.sampler.sample()
             for i, b in enumerate(self.bulbs):
                 target = zc[self.bulb_zone[i]]
+                if stab is not None:
+                    target = stab[i].update(target)
                 c = cur[i]
                 jump = sum(abs(target[k] - c[k]) for k in range(3))
                 a = 0.9 if jump > self.opts.cut else self.opts.smooth

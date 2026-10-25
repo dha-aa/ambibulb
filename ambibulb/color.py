@@ -215,6 +215,50 @@ def zone_colors(img: "Image.Image", zones: int, method: str = "average",
 
 
 # --------------------------------------------------------------------------- #
+# Hue stability (anti-flicker, esp. for anime/busy scenes)
+# --------------------------------------------------------------------------- #
+class HueStabilizer:
+    """Damps hue flicker: the output hue only switches once a *new* hue has
+    dominated for `hold` frames. Saturation and value always pass through
+    instantly, so brightness still reacts immediately. A single off-hue frame
+    (speed lines, a one-frame flash) is ignored; a real scene change sticks.
+    """
+
+    def __init__(self, hold: int = 3, adopt_deg: float = 40.0,
+                 sat_floor: float = 0.15) -> None:
+        self.hold = max(1, hold)
+        self.adopt = adopt_deg / 360.0     # how far counts as a "different" hue
+        self.sat_floor = sat_floor         # below this, hue is meaningless
+        self._locked: float | None = None
+        self._cand: float | None = None
+        self._count = 0
+
+    @staticmethod
+    def _dist(a: float, b: float) -> float:
+        d = abs(a - b) % 1.0
+        return min(d, 1.0 - d)
+
+    def update(self, rgb: RGB) -> RGB:
+        h, s, v = colorsys.rgb_to_hsv(rgb[0] / 255.0, rgb[1] / 255.0, rgb[2] / 255.0)
+        if self._locked is None:
+            self._locked = h
+        elif s >= self.sat_floor:
+            if self._dist(h, self._locked) <= self.adopt:
+                self._cand, self._count = None, 0           # same hue family
+            else:
+                if self._cand is not None and self._dist(h, self._cand) <= self.adopt:
+                    self._count += 1
+                else:
+                    self._count = 1
+                self._cand = h
+                if self._count >= self.hold:                # new hue held -> adopt
+                    self._locked, self._cand, self._count = h, None, 0
+        # Keep the stable hue, but take saturation/value from this frame.
+        r, g, b = colorsys.hsv_to_rgb(self._locked, s, v)
+        return (round(r * 255), round(g * 255), round(b * 255))
+
+
+# --------------------------------------------------------------------------- #
 # Shaping RGB -> bulb HSV
 # --------------------------------------------------------------------------- #
 def shape_hsv(rgb: RGB, opts: ColorOptions) -> tuple[float, float, float]:
