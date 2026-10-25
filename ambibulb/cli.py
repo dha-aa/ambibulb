@@ -29,21 +29,24 @@ log = logging.getLogger("ambibulb")
 BASE = {
     "mode": "average", "zones": 1, "saturation": 1.0, "brightness": 100,
     "smooth": 0.4, "min_delta": 8, "cut": 120, "bulb_rate": 12, "fps": 15,
-    "hue_hold": 0,
+    "hue_hold": 0, "follow_brightness": False, "brightness_floor": 15,
 }
 PRESETS = {
     "default": {},
     # Anime/animation: flat vivid fields + fast cuts -> lock onto the dominant
     # hue, punch the saturation, react snappy, push at the firmware ceiling,
-    # and damp hue flicker on busy frames.
+    # damp hue flicker, and follow scene brightness so dark scenes stay dark.
     "anime": {"mode": "vivid", "saturation": 1.3, "smooth": 0.8, "min_delta": 4,
-              "cut": 70, "bulb_rate": 15, "fps": 24, "hue_hold": 3},
-    # Live-action film: smoother, truer color, gentler cuts.
+              "cut": 70, "bulb_rate": 15, "fps": 24, "hue_hold": 3,
+              "follow_brightness": True, "brightness_floor": 10},
+    # Live-action film: smoother, truer color, gentler cuts, dims in dark scenes.
     "movie": {"mode": "vibrance", "saturation": 1.05, "smooth": 0.25,
-              "min_delta": 6, "cut": 120, "hue_hold": 2},
+              "min_delta": 6, "cut": 120, "hue_hold": 2,
+              "follow_brightness": True, "brightness_floor": 8},
     # Games: vivid and snappy like anime but slightly calmer saturation.
     "game": {"mode": "vivid", "saturation": 1.15, "smooth": 0.8, "min_delta": 4,
-             "cut": 60, "bulb_rate": 15, "fps": 24, "hue_hold": 2},
+             "cut": 60, "bulb_rate": 15, "fps": 24, "hue_hold": 2,
+             "follow_brightness": True, "brightness_floor": 10},
 }
 _MODE_TO_METHOD = {"average": "average", "dominant": "vibrance", "vivid": "vivid"}
 
@@ -85,9 +88,14 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--saturation", type=float, default=None)
     g.add_argument("--brightness", type=int, default=None,
                    help="fixed bulb brightness %% (1-100)")
-    g.add_argument("--follow-brightness", action="store_true",
-                   help="bulb brightness tracks the scene instead of fixed bright")
-    g.add_argument("--brightness-floor", type=int, default=15)
+    g.add_argument("--follow-brightness", dest="follow_brightness",
+                   action="store_const", const=True, default=None,
+                   help="bulb brightness tracks the scene (dark scenes dim)")
+    g.add_argument("--fixed-brightness", dest="follow_brightness",
+                   action="store_const", const=False,
+                   help="force fixed brightness (don't dim on dark scenes)")
+    g.add_argument("--brightness-floor", type=int, default=None,
+                   help="min brightness %% when following the scene (default 15)")
     g.add_argument("--gamma", type=float, default=1.0)
     g.add_argument("--temp", choices=("warm", "neutral", "cool"), default="warm",
                    help="white color temperature for `studio` mode (default: warm)")

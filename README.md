@@ -82,7 +82,7 @@ python3 -m ambibulb run ...            # same, without the console script
 
 | Preset | Tuned for | Sets |
 |---|---|---|
-| `anime` | animation — flat vivid colors, fast cuts | `vivid` mode, high saturation, snappy, low cut, rate 15, fps 24, hue-stability on |
+| `anime` | animation — flat vivid colors, fast cuts | `vivid` mode, high saturation, snappy, low cut, rate 15, fps 24, hue-stability, dims on dark scenes |
 | `movie` | live-action film | `vibrance` mode, gentle smoothing, truer color |
 | `game` | games | vivid + snappy, slightly calmer saturation |
 | `default` | general desktop | plain average, calm |
@@ -96,7 +96,7 @@ python3 -m ambibulb run ...            # same, without the console script
 | `--zones N` | split picture into N zones, map bulbs left→right |
 | `--saturation F` | `<1` softer, `>1` punchier |
 | `--brightness N` | fixed bulb brightness % (default 100) |
-| `--follow-brightness` | brightness tracks the scene (moodier) |
+| `--follow-brightness` / `--fixed-brightness` | dim on dark scenes vs. always full brightness (presets follow by default) |
 | `--bulb-rate N` | commands/sec per bulb (firmware tops out ~12–15) |
 | `--smooth F` | easing toward the new color (lower = calmer) |
 | `--cut N` | per-channel jump that snaps instantly (scene cut) |
