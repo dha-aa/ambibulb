@@ -69,6 +69,8 @@ You read it once, then never touch the cloud again.
 ambibulb run                           # stream whole-screen color to all bulbs
 ambibulb run --preset anime            # vivid + snappy, tuned for animation
 ambibulb run --preset movie --zones 3  # live-action film, per-zone (L/C/R)
+ambibulb studio                        # steady warm white (normal lighting, no sync)
+ambibulb studio --temp neutral --brightness 70   # neutral white at 70%
 ambibulb once                          # push the current color once (quick test)
 ambibulb discover                      # scan the LAN for Tuya devices
 python3 -m ambibulb run ...            # same, without the console script
@@ -100,6 +102,13 @@ python3 -m ambibulb run ...            # same, without the console script
 | `--cut N` | per-channel jump that snaps instantly (scene cut) |
 | `--no-letterbox` | don't auto-crop black movie bars |
 | `--seconds N` | run N seconds then stop (0 = until Ctrl-C) |
+| `--temp warm\|neutral\|cool` | white temperature for `studio` mode (default warm) |
+
+### Studio mode
+
+`ambibulb studio` sets all bulbs to a steady white — normal room light, no
+screen sync. Use `--temp warm|neutral|cool` and `--brightness N`. It applies
+once and exits; the bulbs hold that state until you change it.
 
 `--zones 3` assumes your bulbs are placed left / center / right; config order
 (bulb #1, #2, #3) maps left→right. Otherwise use `--zones 1`.

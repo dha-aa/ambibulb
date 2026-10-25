@@ -52,8 +52,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="Drive Wipro/Tuya smart bulbs from your screen color (local, no cloud).",
     )
     p.add_argument("command", nargs="?", default="run",
-                   choices=("run", "once", "discover"),
-                   help="run (default), once, or discover")
+                   choices=("run", "once", "discover", "studio"),
+                   help="run (default), once, discover, or studio "
+                        "(steady warm white, no screen sync)")
     p.add_argument("--version", action="version", version=f"ambibulb {__version__}")
     p.add_argument("-v", "--verbose", action="store_true", help="debug logging")
 
@@ -83,6 +84,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="bulb brightness tracks the scene instead of fixed bright")
     g.add_argument("--brightness-floor", type=int, default=15)
     g.add_argument("--gamma", type=float, default=1.0)
+    g.add_argument("--temp", choices=("warm", "neutral", "cool"), default="warm",
+                   help="white color temperature for `studio` mode (default: warm)")
 
     g = p.add_argument_group("timing")
     g.add_argument("--fps", type=int, default=None)
@@ -152,6 +155,27 @@ def _make_engine(a: argparse.Namespace) -> AmbientEngine:
     return engine
 
 
+#: white color-temperature names -> percent (0 = warmest, 100 = coolest)
+TEMP_PERCENT = {"warm": 0, "neutral": 50, "cool": 100}
+
+
+def cmd_studio(a: argparse.Namespace) -> int:
+    """Steady white light on all bulbs -- normal room lighting, no screen sync."""
+    bulb_cfgs = load_bulbs(a.config)
+    bulbs = [Bulb(c, BulbOptions(rate=a.bulb_rate)) for c in bulb_cfgs]
+    temp = TEMP_PERCENT[a.temp]
+    bright = a.brightness
+    print(f"Studio mode: {a.temp} white at {bright}% on {len(bulbs)} bulb(s)...")
+    failed = 0
+    for b in bulbs:
+        if b.apply_white(bright, temp):
+            print(f"  {b.name}: set")
+        else:
+            print(f"  {b.name}: FAILED")
+            failed += 1
+    return 0 if failed == 0 else 1
+
+
 def cmd_once(a: argparse.Namespace) -> int:
     if a.mode in ("dominant", "vivid") and not color.HAVE_PIL:
         log.error("--mode dominant/vivid needs Pillow:  pip install pillow")
@@ -205,6 +229,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if a.command == "discover":
             return cmd_discover()
+        if a.command == "studio":
+            return cmd_studio(a)
         if a.command == "once":
             return cmd_once(a)
         return cmd_run(a)

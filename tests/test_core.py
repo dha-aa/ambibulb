@@ -92,6 +92,13 @@ def test_vivid_greyscale_falls_back():
 
 
 # -- config ----------------------------------------------------------------- #
+def test_temp_percent_mapping():
+    from ambibulb.cli import TEMP_PERCENT
+    assert TEMP_PERCENT["warm"] == 0        # warmest
+    assert TEMP_PERCENT["cool"] == 100      # coolest
+    assert TEMP_PERCENT["warm"] < TEMP_PERCENT["neutral"] < TEMP_PERCENT["cool"]
+
+
 def test_load_bulbs_ok(tmp_path):
     p = tmp_path / "bulbs.json"
     p.write_text(json.dumps({"bulbs": [

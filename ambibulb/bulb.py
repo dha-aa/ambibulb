@@ -61,6 +61,26 @@ class Bulb:
         with self._lock:
             self._target = hsv
 
+    def apply_white(self, brightness_pct: int = 100, temp_pct: int = 0) -> bool:
+        """One-shot: put the bulb in white mode (temp_pct 0=warmest, 100=coolest).
+
+        Synchronous -- used by static modes like `studio`, independent of the
+        streaming worker thread. Retries once via IP rediscovery. True on success.
+        """
+        for attempt in range(2):
+            try:
+                self._dev.turn_on()
+                self._dev.set_mode("white")
+                self._dev.set_white_percentage(
+                    max(1, min(100, brightness_pct)), max(0, min(100, temp_pct))
+                )
+                return True
+            except Exception as exc:
+                log.warning("%s: white failed (%s)", self.name, exc)
+                if attempt == 0 and not self._rediscover():
+                    time.sleep(0.5)
+        return False
+
     # -- connection helpers ------------------------------------------------- #
     def _make_device(self, address):
         import tinytuya  # lazy: keep config/color usable without it installed
