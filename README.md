@@ -43,25 +43,90 @@ Requires Python 3.10+.
 
 ## Setup — one time (get your bulbs' local keys)
 
-Tuya bulbs need a secret **local key** before they'll accept local commands.
-You read it once, then never touch the cloud again.
+Every Tuya/Wipro bulb has a secret **local key** that it checks before accepting
+local commands. The key lives in the bulb and in Tuya's cloud — so you read it
+out **once** through a free Tuya developer account, then never touch the cloud
+again. After this, everything runs 100% on your LAN.
 
-1. Pair the bulbs in the **Wipro / Smart Life** app (you've likely done this).
-2. Run the tinytuya wizard (needs a free Tuya IoT account linked to your app
-   account — the only cloud step):
-   ```bash
-   python3 -m tinytuya wizard        # writes devices.json
-   ```
-3. Create your config from the example and fill in each bulb:
-   ```bash
-   cp bulbs.example.json bulbs.json
-   ```
-   Find each bulb's IP any time with:
-   ```bash
-   ambibulb discover
-   ```
+> **Why a cloud account at all?** The key isn't printed anywhere and isn't in
+> the app's files without rooting your phone. The supported way to read it is
+> the Tuya IoT portal, which the `tinytuya wizard` automates. It's ~10 minutes,
+> once.
 
-`bulbs.json` and `devices.json` hold secrets and are **git-ignored** — never commit them.
+### Step 1 — Pair the bulbs in the app
+
+Make sure all your bulbs are already added and working in the **Wipro** app (or
+**Smart Life** — same Tuya platform). Note which app/account they're in.
+
+### Step 2 — Create a free Tuya IoT cloud project
+
+1. Go to **<https://iot.tuya.com>** and sign up / log in.
+2. **Cloud → Development → Create Cloud Project.**
+   - Name: anything.
+   - **Data Center: pick the one for your region** — for Wipro in India, choose
+     **India**. (Wrong data center is the #1 cause of "no devices found" later.)
+   - Industry / Development Method: leave the defaults.
+3. Open the project → **Authorization** tab. Copy and keep:
+   - **Access ID / Client ID**
+   - **Access Secret / Client Secret**
+4. Open the **Service API** tab and make sure **IoT Core** and **Authorization**
+   are in the list (they're enabled by default; if there's an "Authorize"
+   button, click it).
+
+### Step 3 — Link your app account (reuses your existing bulbs)
+
+This imports the bulbs you already paired — you don't re-pair anything.
+
+1. In the project: **Devices → Link App Account → Add App Account.** A **QR
+   code** appears on screen.
+2. On your phone, open the **Wipro app → Me / Profile → the scan icon (top
+   corner)** and scan that QR. Your bulbs now show under **Devices**.
+
+> **If the Wipro app's scan doesn't work** (some builds hide the scanner): open
+> the **Smart Life** app instead, sign in **with the same phone number/email as
+> your Wipro account**, and scan from **Smart Life → Me → scan**. Same Tuya
+> account, same bulbs. Make sure the account you link is the one that actually
+> owns the bulbs.
+
+### Step 4 — Run the wizard to pull the keys
+
+```bash
+python3 -m tinytuya wizard
+```
+
+It asks for four things:
+
+| Prompt | What to enter |
+|---|---|
+| **API Key** | your **Access ID** (from Step 2.3) |
+| **API Secret** | your **Access Secret** |
+| **Device ID** | *any one* of your bulb IDs (just text — **not** your phone; the wizard lists devices, copy one ID) |
+| **Region** | your data center code — **`in`** for India (`us`, `eu`, `cn` otherwise) |
+
+It writes **`devices.json`** containing the `id` + `local key` + version for
+every bulb. If it reports **0 devices** or error **1106 / 28841105**, it's
+almost always the wrong **region** or a different linked account — fix that and
+re-run.
+
+### Step 5 — Build your config
+
+```bash
+cp bulbs.example.json bulbs.json      # then fill in id / key / ip / version
+```
+
+The wizard's `devices.json` has the `id`, `key`, and `version`; get each bulb's
+current **IP** with:
+
+```bash
+ambibulb discover
+```
+
+Match each bulb by `id`, drop its `ip` into `bulbs.json`, and you're done. (IP
+can be `"Auto"` to auto-locate at startup, but a real IP is faster. Better yet,
+set a static DHCP reservation per bulb in your router.)
+
+> **Secrets:** `bulbs.json` and `devices.json` contain your local keys and are
+> **git-ignored** — never commit or share them.
 
 ## Usage
 
