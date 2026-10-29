@@ -209,6 +209,21 @@ because the bulbs are uncalibrated anyway, so the difference is subtle.
 ambibulb-follow --mode vivid       # on-screen panel that follows your screen color
 ```
 
+## HomeKit & Siri
+
+Bridge the bulbs into Apple HomeKit (via Homebridge) to control them with
+**Siri and the Home app** — locally, using the same keys. One command sets it
+up:
+
+```bash
+./scripts/setup-homekit.sh
+```
+
+Then pair on an iPhone/iPad (Apple requires an iOS device to *add* a HomeKit
+accessory — the Mac can only control it afterward) and use "Hey Siri" on the
+Mac. Full guide, pairing steps, persistence, and a no-Apple-device alternative:
+**[docs/homekit.md](docs/homekit.md)**.
+
 ## Layout
 
 ```
