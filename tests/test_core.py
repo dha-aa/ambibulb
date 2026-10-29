@@ -148,6 +148,48 @@ def test_hue_stabilizer_passes_brightness_through():
     assert max(out) < 160          # value tracked down immediately
 
 
+# -- gesture finger counting ------------------------------------------------ #
+def _hand(fingers_up: bool, thumb_out: bool):
+    """Build 21 synthetic landmarks for an upright hand (y grows downward)."""
+    lm = [(0.5, 0.9, 0.0)] * 21          # default near wrist height
+    lm[0] = (0.5, 0.95, 0.0)             # wrist
+    tip_y, pip_y = (0.2, 0.5) if fingers_up else (0.6, 0.5)  # up: tip above pip
+    for mcp, pip, dip, tip in [(5, 6, 7, 8), (9, 10, 11, 12),
+                               (13, 14, 15, 16), (17, 18, 19, 20)]:
+        lm[mcp] = (0.4, 0.55, 0.0)
+        lm[pip] = (0.4, pip_y, 0.0)
+        lm[tip] = (0.4, tip_y, 0.0)
+    # thumb: landmarks 2 (mcp), 3 (ip), 4 (tip); index base is 5 at x=0.4
+    lm[2] = (0.45, 0.6, 0.0)
+    if thumb_out:
+        lm[3] = (0.40, 0.58, 0.0)
+        lm[4] = (0.15, 0.55, 0.0)        # tip far from index base (5)
+    else:
+        lm[3] = (0.42, 0.58, 0.0)
+        lm[4] = (0.43, 0.57, 0.0)        # tip tucked near index base
+    return lm
+
+
+def test_count_fingers_fist():
+    from ambibulb.gesture import count_fingers
+    assert count_fingers(_hand(fingers_up=False, thumb_out=False)) == 0
+
+
+def test_count_fingers_open_palm():
+    from ambibulb.gesture import count_fingers
+    assert count_fingers(_hand(fingers_up=True, thumb_out=True)) == 5
+
+
+def test_count_fingers_four_no_thumb():
+    from ambibulb.gesture import count_fingers
+    assert count_fingers(_hand(fingers_up=True, thumb_out=False)) == 4
+
+
+def test_gesture_action_map_covers_0_to_5():
+    from ambibulb.gesture import ACTIONS
+    assert set(ACTIONS) == {0, 1, 2, 3, 4, 5}
+
+
 # -- config ----------------------------------------------------------------- #
 def test_temp_percent_mapping():
     from ambibulb.cli import TEMP_PERCENT

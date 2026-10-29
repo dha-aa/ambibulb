@@ -163,6 +163,7 @@ ambibulb studio                        # steady warm white (normal lighting, no 
 ambibulb studio --temp neutral --brightness 70   # neutral white at 70%
 ambibulb identify                      # blink each bulb in turn to see which is which
 ambibulb identify --name "Bedroom"     # blink just one bulb
+ambibulb gesture                       # control by hand gestures via the webcam
 ambibulb once                          # push the current color once (quick test)
 ambibulb discover                      # scan the LAN for Tuya devices
 python3 -m ambibulb run ...            # same, without the console script
@@ -233,6 +234,29 @@ because the bulbs are uncalibrated anyway, so the difference is subtle.
 ```bash
 ambibulb-follow --mode vivid       # on-screen panel that follows your screen color
 ```
+
+## Gesture control (webcam)
+
+Control the bulbs with **hand gestures** via your webcam (MediaPipe hand
+tracking). Optional feature:
+
+```bash
+pip install "ambibulb[gesture]"     # mediapipe + opencv
+ambibulb gesture                    # show your hand to the camera
+```
+
+| Fingers | Action |
+|---|---|
+| ✊ 0 (fist) | all off |
+| ☝️ 1 | red |
+| ✌️ 2 | green |
+| 🤟 3 | blue |
+| 4 | warm white |
+| 🖐 5 | on / white |
+
+A small preview window shows the detected finger count; gestures are debounced
+(held briefly before firing). Press `q` to quit, or `--no-preview` for headless.
+macOS asks for **Camera permission** on first run.
 
 ## HomeKit & Siri
 
