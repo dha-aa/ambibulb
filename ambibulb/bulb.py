@@ -61,6 +61,25 @@ class Bulb:
         with self._lock:
             self._target = hsv
 
+    def blink(self, flashes: int = 4, on: float = 0.4, off: float = 0.3) -> bool:
+        """Flash the bulb bright white a few times to physically identify it,
+        then turn it off. Synchronous; retries once via IP rediscovery."""
+        for attempt in range(2):
+            try:
+                for _ in range(flashes):
+                    self._dev.turn_on()
+                    self._dev.set_mode("white")
+                    self._dev.set_white_percentage(100, 50)
+                    time.sleep(on)
+                    self._dev.turn_off()
+                    time.sleep(off)
+                return True
+            except Exception as exc:
+                log.warning("%s: blink failed (%s)", self.name, exc)
+                if attempt == 0 and not self._rediscover():
+                    time.sleep(0.5)
+        return False
+
     def apply_white(self, brightness_pct: int = 100, temp_pct: int = 0) -> bool:
         """One-shot: put the bulb in white mode (temp_pct 0=warmest, 100=coolest).
 

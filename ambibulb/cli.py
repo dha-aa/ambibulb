@@ -57,9 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="Drive Wipro/Tuya smart bulbs from your screen color (local, no cloud).",
     )
     p.add_argument("command", nargs="?", default="run",
-                   choices=("run", "once", "discover", "studio"),
-                   help="run (default), once, discover, or studio "
-                        "(steady warm white, no screen sync)")
+                   choices=("run", "once", "discover", "studio", "identify"),
+                   help="run (default), once, discover, studio "
+                        "(steady warm white), or identify (blink each bulb)")
+    p.add_argument("--name", default=None,
+                   help="for `identify`: blink only the bulb with this name")
     p.add_argument("--version", action="version", version=f"ambibulb {__version__}")
     p.add_argument("-v", "--verbose", action="store_true", help="debug logging")
 
@@ -194,6 +196,28 @@ def cmd_studio(a: argparse.Namespace) -> int:
     return 0 if failed == 0 else 1
 
 
+def cmd_identify(a: argparse.Namespace) -> int:
+    """Blink each bulb in turn so you can see which physical bulb is which."""
+    bulb_cfgs = load_bulbs(a.config)
+    bulbs = [Bulb(c, BulbOptions(rate=a.bulb_rate)) for c in bulb_cfgs]
+    if a.name:
+        bulbs = [b for b in bulbs if b.name == a.name]
+        if not bulbs:
+            names = [c.name for c in bulb_cfgs]
+            log.error("No bulb named %r. Have: %s", a.name, names)
+            return 2
+    print("Blinking each bulb — watch which one flashes, then label its spot:\n")
+    failed = 0
+    for i, b in enumerate(bulbs):
+        print(f"  [{i + 1}/{len(bulbs)}] {b.name} ...")
+        if not b.blink():
+            print(f"      ({b.name}: unreachable)")
+            failed += 1
+        threading.Event().wait(0.8)
+    print("\nDone. Order bulbs.json left->right to match for --zones.")
+    return 0 if failed == 0 else 1
+
+
 def cmd_once(a: argparse.Namespace) -> int:
     if a.mode in ("dominant", "vivid") and not color.HAVE_PIL:
         log.error("--mode dominant/vivid needs Pillow:  pip install pillow")
@@ -249,6 +273,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_discover()
         if a.command == "studio":
             return cmd_studio(a)
+        if a.command == "identify":
+            return cmd_identify(a)
         if a.command == "once":
             return cmd_once(a)
         return cmd_run(a)

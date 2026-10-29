@@ -136,6 +136,8 @@ ambibulb run --preset anime            # vivid + snappy, tuned for animation
 ambibulb run --preset movie --zones 3  # live-action film, per-zone (L/C/R)
 ambibulb studio                        # steady warm white (normal lighting, no sync)
 ambibulb studio --temp neutral --brightness 70   # neutral white at 70%
+ambibulb identify                      # blink each bulb in turn to see which is which
+ambibulb identify --name "Bedroom"     # blink just one bulb
 ambibulb once                          # push the current color once (quick test)
 ambibulb discover                      # scan the LAN for Tuya devices
 python3 -m ambibulb run ...            # same, without the console script
@@ -176,6 +178,14 @@ python3 -m ambibulb run ...            # same, without the console script
 `ambibulb studio` sets all bulbs to a steady white — normal room light, no
 screen sync. Use `--temp warm|neutral|cool` and `--brightness N`. It applies
 once and exits; the bulbs hold that state until you change it.
+
+### Identify which bulb is which
+
+`ambibulb identify` blinks each bulb bright-white in turn, printing its name, so
+you can see which physical bulb maps to which config entry — handy for ordering
+`bulbs.json` left→right for `--zones`. Use `--name "<bulb>"` to blink just one.
+(Smart bulbs have no positioning hardware, so blinking is the reliable way to
+locate them — distance/RSSI can't be measured from these.)
 
 ### Wide-gamut (P3) displays
 
