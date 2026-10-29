@@ -31,7 +31,32 @@ screen grab → crop black bars → extract color (per zone) → ease / snap →
 
 Each stage is an independent, testable module (see [Layout](#layout)).
 
-## Install
+## Quick start
+
+```bash
+git clone https://github.com/dha-aa/ambibulb.git && cd ambibulb
+./setup.sh                          # installs deps; builds bulbs.json if possible
+```
+
+`setup.sh` automates everything it can. The **one manual step** — unavoidable,
+for any tool — is reading your bulbs' **local keys** (needs a free Tuya account
+linked to your Wipro/Smart Life app). `setup.sh` tells you when to run:
+
+```bash
+python3 -m tinytuya wizard          # writes devices.json (your keys)
+./setup.sh                          # re-run: turns devices.json into bulbs.json
+```
+
+Then:
+
+```bash
+ambibulb run --preset anime
+```
+
+See [Setup](#setup--one-time-get-your-bulbs-local-keys) for the detailed
+key-reading walkthrough, and [HomeKit & Siri](#homekit--siri) for voice control.
+
+## Install (manual)
 
 ```bash
 pip install -e .            # from this directory (gives the `ambibulb` command)
