@@ -180,14 +180,31 @@ def test_count_fingers_open_palm():
     assert count_fingers(_hand(fingers_up=True, thumb_out=True)) == 5
 
 
-def test_count_fingers_four_no_thumb():
-    from ambibulb.gesture import count_fingers
-    assert count_fingers(_hand(fingers_up=True, thumb_out=False)) == 4
+def test_is_open_palm_and_fist():
+    from ambibulb.gesture import finger_states, is_open_palm, is_fist
+    assert is_open_palm(finger_states(_hand(True, True)))
+    assert is_fist(finger_states(_hand(False, False)))
 
 
-def test_gesture_action_map_covers_0_to_5():
-    from ambibulb.gesture import ACTIONS
-    assert set(ACTIONS) == {0, 1, 2, 3, 4, 5}
+def test_swipe_detector_direction():
+    from ambibulb.gesture import SwipeDetector
+    s = SwipeDetector(min_dx=0.2, window=1.0)
+    assert s.update(0.2, 0.0) is None
+    assert s.update(0.6, 0.1) == "right"      # moved +0.4 fast
+    s2 = SwipeDetector(min_dx=0.2, window=1.0)
+    s2.update(0.8, 0.0)
+    assert s2.update(0.3, 0.1) == "left"       # moved -0.5
+
+
+def test_tap_detector_double_tap():
+    from ambibulb.gesture import TapDetector
+    td = TapDetector(close=0.05, open_=0.09, max_gap=0.6)
+    assert td.update(0.02, 0.00) is False      # first close (tap 1)
+    assert td.update(0.12, 0.05) is False      # open
+    assert td.update(0.02, 0.20) is True       # second close within gap -> double
+    # a slow second tap should NOT double-fire
+    assert td.update(0.12, 0.30) is False
+    assert td.update(0.02, 2.00) is False      # too late = tap 1 again, not double
 
 
 # -- config ----------------------------------------------------------------- #

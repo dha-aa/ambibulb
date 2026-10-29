@@ -242,21 +242,22 @@ tracking). Optional feature:
 
 ```bash
 pip install "ambibulb[gesture]"     # mediapipe + opencv
-ambibulb gesture                    # show your hand to the camera
+ambibulb gesture                    # show your hands to the camera
 ```
 
-| Fingers | Action |
-|---|---|
-| ✊ 0 (fist) | all off |
-| ☝️ 1 | red |
-| ✌️ 2 | green |
-| 🤟 3 | blue |
-| 4 | warm white |
-| 🖐 5 | on / white |
+| Hand | Gesture | Action |
+|---|---|---|
+| Right | thumb+index — hold & spread | **brightness** of selected bulb |
+| Right | thumb+index — **double-tap** | toggle selected bulb **on/off** |
+| Right | thumb+middle — hold & spread | **brightness of all** bulbs |
+| Right | thumb+middle — **double-tap** | toggle **all** bulbs on/off |
+| Right | open-palm **swipe** L/R | **switch** which bulb is selected |
+| Left | open-palm **swipe** L/R | **cycle color** (warm/cool/red/green/blue/white) |
 
-A small preview window shows the detected finger count; gestures are debounced
-(held briefly before firing). Press `q` to quit, or `--no-preview` for headless.
-macOS asks for **Camera permission** on first run.
+A held, spread pinch sets brightness; a quick double-tap toggles power — they
+don't collide. A preview window shows the live state (selected bulb, color,
+brightness). Press `q` to quit, `--no-preview` for headless, `--swap-hands` if
+left/right read reversed. macOS asks for **Camera permission** on first run.
 
 ## HomeKit & Siri
 

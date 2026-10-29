@@ -80,6 +80,20 @@ class Bulb:
                     time.sleep(0.5)
         return False
 
+    def apply_hsv(self, h: float, s: float, v: float) -> bool:
+        """One-shot: set colour by HSV (all 0..1), fire-and-forget. Retries once."""
+        for attempt in range(2):
+            try:
+                self._dev.turn_on()
+                self._dev.set_mode("colour")
+                self._dev.set_hsv(h, s, v, nowait=True)
+                return True
+            except Exception as exc:
+                log.warning("%s: hsv failed (%s)", self.name, exc)
+                if attempt == 0 and not self._rediscover():
+                    time.sleep(0.5)
+        return False
+
     def apply_color(self, rgb: tuple[int, int, int]) -> bool:
         """One-shot: set a solid RGB color (colour mode). Retries via rediscovery."""
         for attempt in range(2):
