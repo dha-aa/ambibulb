@@ -22,9 +22,12 @@ left/right feel reversed.
 from __future__ import annotations
 
 import logging
+import shutil
+import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .bulb import Bulb, BulbOptions
 from .config import load_bulbs
@@ -242,15 +245,53 @@ class GestureController:
         return new
 
 
+MODEL_URL = ("https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
+             "hand_landmarker/float16/latest/hand_landmarker.task")
+MODEL_PATH = Path.home() / ".cache" / "ambibulb" / "hand_landmarker.task"
+
+
+def ensure_model(path: Path = MODEL_PATH) -> Path | None:
+    """Download the MediaPipe hand model once (~7.5 MB). Uses curl when present
+    (resumable, and avoids python.org Python's missing-CA-cert issue)."""
+    if path.exists() and path.stat().st_size > 1_000_000:
+        return path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Downloading hand model to {path} ...")
+    if shutil.which("curl"):
+        rc = subprocess.call(["curl", "-fsSL", "--retry", "5", "-C", "-",
+                              "-o", str(path), MODEL_URL])
+        if rc == 0 and path.exists():
+            return path
+    try:
+        import urllib.request
+        urllib.request.urlretrieve(MODEL_URL, path)
+        return path
+    except Exception as exc:
+        log.error("could not download the hand model (%s). Download it "
+                  "manually from %s to %s", exc, MODEL_URL, path)
+        return None
+
+
+def _draw_hand(cv2, frame, lm, connections) -> None:
+    """Draw landmarks + bones on the preview frame."""
+    h, w = frame.shape[:2]
+    pts = [(int(x * w), int(y * h)) for x, y, _ in lm]
+    for c in connections:
+        cv2.line(frame, pts[c.start], pts[c.end], (224, 224, 224), 2)
+    for p in pts:
+        cv2.circle(frame, p, 3, (0, 0, 255), -1)
+
+
 def run(opts: GestureOptions) -> int:
     try:
         import cv2
         import mediapipe as mp
+        from mediapipe.tasks.python import BaseOptions, vision
     except ImportError:
         log.error('gesture control needs extra deps:  pip install "ambibulb[gesture]"')
         return 2
-    if not (hasattr(mp, "solutions") and hasattr(mp.solutions, "hands")):
-        log.error("this mediapipe build has no solutions.hands API.")
+    model = ensure_model()
+    if model is None:
         return 2
 
     ctrl = GestureController([Bulb(c, BulbOptions(rate=opts.bulb_rate))
@@ -261,10 +302,16 @@ def run(opts: GestureOptions) -> int:
                   "System Settings > Privacy & Security.", opts.camera)
         return 2
 
-    hands = mp.solutions.hands.Hands(max_num_hands=2,
-                                     min_detection_confidence=0.7,
-                                     min_tracking_confidence=0.5)
-    draw = mp.solutions.drawing_utils
+    hands = vision.HandLandmarker.create_from_options(vision.HandLandmarkerOptions(
+        base_options=BaseOptions(model_asset_path=str(model)),
+        running_mode=vision.RunningMode.VIDEO,
+        num_hands=2,
+        min_hand_detection_confidence=0.6,
+        min_hand_presence_confidence=0.5,
+        min_tracking_confidence=0.5,
+    ))
+    connections = vision.HandLandmarksConnections.HAND_CONNECTIONS
+    t0 = time.monotonic()
     swipe = {"Right": SwipeDetector(), "Left": SwipeDetector()}
     tap_index = TapDetector()      # thumb+index double-tap -> toggle selected
     tap_middle = TapDetector()     # thumb+middle double-tap -> toggle all
@@ -285,19 +332,20 @@ def run(opts: GestureOptions) -> int:
             if not ok:
                 break
             frame = cv2.flip(frame, 1)
-            res = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            ts = int((time.monotonic() - t0) * 1000)
+            res = hands.detect_for_video(
+                mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), ts)
             now = time.time()
             status = f"bulb {ctrl.s.selected + 1}/{len(ctrl.bulbs)}  {COLORS[ctrl.s.color_idx][0]}"
 
             hands_lm = {}
-            if res.multi_hand_landmarks and res.multi_handedness:
-                for h_lm, h_cls in zip(res.multi_hand_landmarks, res.multi_handedness):
-                    lm = [(p.x, p.y, p.z) for p in h_lm.landmark]
-                    label = handed(h_cls.classification[0].label)
-                    hands_lm[label] = lm
-                    if opts.preview:
-                        draw.draw_landmarks(frame, h_lm,
-                                            mp.solutions.hands.HAND_CONNECTIONS)
+            for h_lm, h_cls in zip(res.hand_landmarks or [], res.handedness or []):
+                lm = [(p.x, p.y, p.z) for p in h_lm]
+                label = handed(h_cls[0].category_name)
+                hands_lm[label] = lm
+                if opts.preview:
+                    _draw_hand(cv2, frame, lm, connections)
 
             for label, lm in hands_lm.items():
                 st = finger_states(lm)

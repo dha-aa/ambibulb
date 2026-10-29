@@ -241,9 +241,14 @@ Control the bulbs with **hand gestures** via your webcam (MediaPipe hand
 tracking). Optional feature:
 
 ```bash
-pip install "ambibulb[gesture]"     # mediapipe + opencv
+EXTRAS=gesture ./setup.sh           # mediapipe + opencv (or: pip install "ambibulb[gesture]")
+MIRROR=huawei EXTRAS=gesture ./setup.sh   # if PyPI downloads crawl on your network
 ambibulb gesture                    # show your hands to the camera
 ```
+
+The hand-tracking model (~7.5 MB) downloads automatically on first run to
+`~/.cache/ambibulb/`. Your terminal app needs **Camera** access
+(System Settings → Privacy & Security → Camera).
 
 | Hand | Gesture | Action |
 |---|---|---|

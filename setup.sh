@@ -14,10 +14,32 @@ cd "$HERE"
 echo "==> ambibulb setup"
 command -v python3 >/dev/null || { echo "  python3 is required: https://www.python.org"; exit 1; }
 
-echo "==> Installing ambibulb + dependencies (mss, pillow, tinytuya)"
-if ! python3 -m pip install -e . ; then
+# Optional extras, e.g.  EXTRAS=gesture ./setup.sh   (installs mediapipe + opencv)
+SPEC="."
+[ -n "${EXTRAS:-}" ] && SPEC=".[${EXTRAS}]"
+
+# Slow PyPI? Use a mirror:  MIRROR=huawei ./setup.sh   (or set MIRROR to any
+# index URL). The default PyPI CDN can crawl on some networks.
+case "${MIRROR:-}" in
+  "")       INDEX_ARGS=() ;;
+  huawei)   INDEX_ARGS=(--index-url https://repo.huaweicloud.com/repository/pypi/simple) ;;
+  aliyun)   INDEX_ARGS=(--index-url https://mirrors.aliyun.com/pypi/simple) ;;
+  tsinghua) INDEX_ARGS=(--index-url https://pypi.tuna.tsinghua.edu.cn/simple) ;;
+  *)        INDEX_ARGS=(--index-url "$MIRROR") ;;
+esac
+
+echo "==> Installing ambibulb + dependencies ($SPEC)"
+# uv is much faster than pip (parallel, resumable downloads); use it if present.
+if command -v uv >/dev/null; then
+  INSTALL=(uv pip install --python "$(command -v python3)" ${INDEX_ARGS[@]+"${INDEX_ARGS[@]}"} -e "$SPEC")
+else
+  INSTALL=(python3 -m pip install ${INDEX_ARGS[@]+"${INDEX_ARGS[@]}"} -e "$SPEC")
+fi
+if ! "${INSTALL[@]}" ; then
   echo
-  echo "  pip install failed. If you saw 'externally-managed-environment', use a venv:"
+  echo "  Install failed. If downloads are crawling, retry with a mirror:"
+  echo "      MIRROR=huawei ./setup.sh"
+  echo "  If you saw 'externally-managed-environment', use a venv:"
   echo "      python3 -m venv .venv && source .venv/bin/activate && ./setup.sh"
   exit 1
 fi
