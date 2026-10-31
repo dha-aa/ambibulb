@@ -196,15 +196,13 @@ def test_swipe_detector_direction():
     assert s2.update(0.3, 0.1) == "left"       # moved -0.5
 
 
-def test_tap_detector_double_tap():
-    from ambibulb.gesture import TapDetector
-    td = TapDetector(close=0.05, open_=0.09, max_gap=0.6)
-    assert td.update(0.02, 0.00) is False      # first close (tap 1)
-    assert td.update(0.12, 0.05) is False      # open
-    assert td.update(0.02, 0.20) is True       # second close within gap -> double
-    # a slow second tap should NOT double-fire
-    assert td.update(0.12, 0.30) is False
-    assert td.update(0.02, 2.00) is False      # too late = tap 1 again, not double
+def test_finger_states_rotation_invariant():
+    from ambibulb.gesture import finger_states
+    up = _hand(True, True)
+    # rotate the whole hand 90 degrees around the wrist: pointing sideways
+    wx, wy, _ = up[0]
+    sideways = [(wx + (y - wy), wy - (x - wx), z) for x, y, z in up]
+    assert finger_states(sideways)[1:] == finger_states(up)[1:] == (True,) * 4
 
 
 # -- config ----------------------------------------------------------------- #
@@ -241,3 +239,120 @@ def test_load_bulbs_duplicate_id(tmp_path):
         {"id": "x", "key": "k"}, {"id": "x", "key": "k2"}]}))
     with pytest.raises(ConfigError):
         load_bulbs(p)
+
+
+def test_gesture_cli_args_match_options(monkeypatch):
+    # cmd_gesture must build GestureOptions from parsed args without TypeError.
+    import ambibulb.gesture as g
+    from ambibulb import cli
+    seen = {}
+    monkeypatch.setattr(g, "run", lambda opts: seen.setdefault("opts", opts) and 0)
+    a = cli.build_parser().parse_args(["gesture", "--swap-hands", "--no-preview"])
+    cli.resolve_preset(a)
+    cli.cmd_gesture(a)
+    assert seen["opts"].swap_hands is True and seen["opts"].preview is False
+
+
+def _at_x(x):
+    # 21 landmarks with the middle-finger base (index 9) at screen x
+    return [(x, 0.5, 0.0)] * 21
+
+
+def test_assign_hands_two_hands_by_screen_position():
+    from ambibulb.gesture import assign_hands
+    # MediaPipe labels are wrong here on purpose; position must win.
+    out = assign_hands([("Right", _at_x(0.25)), ("Left", _at_x(0.75))])
+    assert out["Right"][9][0] == 0.75 and out["Left"][9][0] == 0.25
+
+
+def test_assign_hands_single_hand_inverts_mediapipe_label():
+    from ambibulb.gesture import assign_hands
+    assert list(assign_hands([("Left", _at_x(0.7))])) == ["Right"]
+    assert list(assign_hands([("Right", _at_x(0.3))])) == ["Left"]
+
+
+def test_assign_hands_swap_flag():
+    from ambibulb.gesture import assign_hands
+    assert list(assign_hands([("Left", _at_x(0.7))], swap=True)) == ["Left"]
+
+
+def _run_pinch(seq, fps=30):
+    """Feed (ri, rm, y, seconds) segments to a PinchGesture; collect events."""
+    from ambibulb.gesture import PinchGesture
+    g, t, evs = PinchGesture(), 0.0, []
+    for ri, rm, y, dur in seq:
+        for _ in range(max(1, int(dur * fps))):
+            evs += g.update(ri, rm, y, t)
+            t += 1 / fps
+    return evs
+
+
+def test_pinch_double_tap_index():
+    evs = _run_pinch([(1.0, 1.2, .5, .3), (.1, .9, .5, .12), (1.0, 1.2, .5, .15),
+                      (.1, .9, .5, .12), (1.0, 1.2, .5, .3)])
+    assert [e for e in evs if e[0] == "double"] == [("double", "index")]
+
+
+def test_pinch_double_tap_middle_with_ok_sign_style():
+    # middle touches the thumb; index stays far (any finger posture allowed)
+    evs = _run_pinch([(1.0, 1.0, .5, .3), (.9, .1, .5, .12), (1.0, 1.0, .5, .15),
+                      (.9, .1, .5, .12), (1.0, 1.0, .5, .3)])
+    assert [e for e in evs if e[0] == "double"] == [("double", "middle")]
+
+
+def test_pinch_hold_becomes_drag_not_tap():
+    evs = _run_pinch([(1.0, 1.2, .50, .3), (.1, .9, .50, .4),   # hold -> drag
+                      (.1, .9, .30, .3),                        # move hand up
+                      (1.0, 1.2, .30, .2)])                     # release
+    kinds = [e[0] for e in evs]
+    assert "double" not in kinds
+    assert kinds.count("drag_start") == 1 and kinds.count("drag_end") == 1
+    drags = [e[2] for e in evs if e[0] == "drag"]
+    assert drags[-1] > 0.15            # moved up by ~0.2 screen units
+
+
+def test_pinch_slow_taps_do_not_double():
+    evs = _run_pinch([(1.0, 1.2, .5, .3), (.1, .9, .5, .12), (1.0, 1.2, .5, 1.5),
+                      (.1, .9, .5, .12), (1.0, 1.2, .5, .3)])
+    assert not [e for e in evs if e[0] == "double"]
+
+
+def test_one_euro_smooths_jitter_but_follows_motion():
+    from ambibulb.gesture import OneEuro
+    f, t, out = OneEuro(), 0.0, []
+    for i in range(60):                      # still hand with +-0.01 jitter
+        out.append(f(0.5 + (0.01 if i % 2 else -0.01), t)); t += 1 / 30
+    assert max(out[20:]) - min(out[20:]) < 0.012     # jitter reduced
+    for _ in range(15):                      # then a fast move to 0.9
+        v = f(0.9, t); t += 1 / 30
+    assert v > 0.85                          # caught up within 0.5 s
+
+
+def test_hand_smoother_bridges_brief_dropout():
+    from ambibulb.gesture import HandSmoother
+    s, lm = HandSmoother(hold=0.2), [(0.5, 0.5, 0.0)] * 21
+    assert "Right" in s.update({"Right": lm}, 0.0)
+    assert "Right" in s.update({}, 0.1)      # 100 ms gap: still there
+    assert "Right" not in s.update({}, 0.5)  # long gap: gone
+
+
+def test_hand_labeler_sticky_single_hand():
+    from ambibulb.gesture import HandLabeler
+    lab = HandLabeler()
+    hand = [(0.7, 0.5, 0.0)] * 21
+    assert list(lab([("Left", hand)], 0.0)) == ["Right"]   # inverted label
+    # MediaPipe flips its label for one frame; the hand hasn't moved
+    assert list(lab([("Right", hand)], 0.03)) == ["Right"]
+
+
+def test_assign_hands_drops_duplicate_detection():
+    from ambibulb.gesture import assign_hands
+    def hand(x):
+        lm = [(x, 0.5, 0.0)] * 21
+        lm[0] = (x, 0.7, 0.0)            # wrist 0.2 below palm centre -> scale 0.2
+        return lm
+    # same hand reported twice, 0.002 apart -> one hand, not a Left+Right pair
+    out = assign_hands([("Left", hand(0.540)), ("Right", hand(0.538))])
+    assert len(out) == 1
+    # genuinely two hands far apart -> both kept
+    assert len(assign_hands([("Left", hand(0.3)), ("Right", hand(0.75))])) == 2

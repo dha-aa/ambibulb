@@ -65,8 +65,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="for `identify`: blink only the bulb with this name")
     p.add_argument("--camera", type=int, default=0,
                    help="for `gesture`: webcam index (default 0)")
-    p.add_argument("--hold", type=int, default=6,
-                   help="for `gesture`: frames a gesture must persist before firing")
+    p.add_argument("--swap-hands", action="store_true",
+                   help="for `gesture`: swap left/right if they read reversed")
+    p.add_argument("--debug", action="store_true",
+                   help="for `gesture`: log raw hand measurements for tuning")
+    p.add_argument("--record", default=None, metavar="FILE",
+                   help="for `gesture`: write every frame's measurements to a JSONL file")
     p.add_argument("--no-preview", action="store_true",
                    help="for `gesture`: run without the webcam preview window")
     p.add_argument("--version", action="version", version=f"ambibulb {__version__}")
@@ -228,7 +232,8 @@ def cmd_identify(a: argparse.Namespace) -> int:
 def cmd_gesture(a: argparse.Namespace) -> int:
     from .gesture import GestureOptions, run
     return run(GestureOptions(
-        config=str(a.config), camera=a.camera, hold=a.hold,
+        config=str(a.config), camera=a.camera, swap_hands=a.swap_hands,
+        debug=a.debug, record=a.record,
         preview=not a.no_preview, bulb_rate=a.bulb_rate,
     ))
 

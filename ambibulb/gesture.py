@@ -6,21 +6,22 @@ Optional feature. Install the extra deps with:
 
 Gesture scheme (a small preview window shows the live state):
 
-  Right thumb+index  hold & spread                  -> brightness of SELECTED bulb
-  Right thumb+index  double-tap                      -> toggle SELECTED bulb on/off
-  Right thumb+middle hold & spread                  -> brightness of ALL bulbs
-  Right thumb+middle double-tap                      -> toggle ALL bulbs on/off
-  Right open-palm swipe left/right                  -> switch which bulb is selected
-  Left  open-palm swipe left/right                  -> cycle color (warm/cool/R/G/B/white)
+  pinch thumb+index,  double-tap            -> toggle SELECTED bulb on/off
+  pinch thumb+index,  hold + move up/down   -> brightness of SELECTED bulb
+  pinch thumb+middle, double-tap            -> toggle ALL bulbs on/off
+  pinch thumb+middle, hold + move up/down   -> brightness of ALL bulbs
+  RIGHT open hand, quick flick left/right   -> switch which bulb is selected
+  LEFT  open hand, quick flick left/right   -> cycle color (warm/cool/R/G/B/white)
 
-A quick double-tap (fingers touch twice fast) toggles power; a held, spread
-pinch sets brightness — the two don't collide. macOS asks for Camera permission
-on first run. Handedness can read mirrored on some cameras — use --swap-hands if
-left/right feel reversed.
+A pinch is the thumb tip touching the fingertip; the other fingers can be in
+any position (an 'OK' sign works). Pinches work with either hand. Landmarks
+are One-Euro filtered and brief detection dropouts are bridged. macOS asks for
+Camera permission on first run; use --swap-hands if left/right read reversed.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import subprocess
@@ -54,12 +55,29 @@ def _dist(a, b) -> float:
 
 
 def finger_states(lm) -> tuple[bool, bool, bool, bool, bool]:
-    """(thumb, index, middle, ring, pinky) extended? from 21 landmarks."""
+    """(thumb, index, middle, ring, pinky) extended? from 21 landmarks.
+
+    Rotation-invariant: a finger is extended when its tip is clearly farther
+    from the wrist than its PIP joint (works whether the hand points up,
+    sideways, or tilted)."""
     if not lm or len(lm) < 21:
         return (False, False, False, False, False)
-    four = [lm[t][1] < lm[p][1] - 0.02 for t, p in zip(_TIPS, _PIPS)]
+    w = lm[0]
+    four = [_dist(lm[t], w) > _dist(lm[p], w) * 1.1 for t, p in zip(_TIPS, _PIPS)]
     thumb = _dist(lm[4], lm[5]) > _dist(lm[3], lm[5]) * 1.3
     return (thumb, four[0], four[1], four[2], four[3])
+
+
+def hand_scale(lm) -> float:
+    """Hand size (wrist -> middle-finger base). Dividing by this makes pinch
+    measurements independent of how far the hand is from the camera."""
+    return max(_dist(lm[0], lm[9]), 1e-6)
+
+
+def pinch_ratio(lm, finger_tip: int) -> float:
+    """Thumb-tip to `finger_tip` gap, in hand-size units (~0.1 touching,
+    ~1.0+ fully spread)."""
+    return _dist(lm[4], lm[finger_tip]) / hand_scale(lm)
 
 
 def count_fingers(lm) -> int:
@@ -101,10 +119,41 @@ def is_pinch_middle_pose(st) -> bool:
     return st[2] and not st[1] and not st[3] and not st[4]
 
 
+_OTHER = {"Left": "Right", "Right": "Left"}
+
+
+def assign_hands(detected: list[tuple[str, list]], swap: bool = False) -> dict:
+    """Map detected hands to the user's real 'Left'/'Right'.
+
+    The preview is mirrored (like a mirror: your right hand is on the right of
+    the screen). MediaPipe's handedness label comes out inverted for this
+    mirrored input, so:
+      * two hands  -> trust screen position: larger x is the right hand;
+      * one hand   -> use MediaPipe's label, inverted.
+    `swap` flips the result for cameras that behave the other way."""
+    out: dict[str, list] = {}
+    # MediaPipe occasionally reports the same hand twice (two overlapping
+    # detections). Drop a second hand whose palm centre sits within half a
+    # hand-length of the first, or one real hand becomes a fake Left+Right pair.
+    if len(detected) >= 2:
+        (_, a), (_, b) = detected[0], detected[1]
+        if _dist(a[9], b[9]) < 0.5 * max(hand_scale(a), hand_scale(b)):
+            detected = detected[:1]
+    if len(detected) >= 2:
+        a, b = sorted(detected[:2], key=lambda d: hand_x(d[1]))
+        out = {"Left": a[1], "Right": b[1]}
+    elif len(detected) == 1:
+        label, lm = detected[0]
+        out = {_OTHER.get(label, "Right"): lm}
+    if swap:
+        out = {_OTHER[k]: v for k, v in out.items()}
+    return out
+
+
 class SwipeDetector:
     """Detects a fast horizontal swipe from a stream of (x, t) samples."""
 
-    def __init__(self, min_dx: float = 0.22, window: float = 0.5,
+    def __init__(self, min_dx: float = 0.12, window: float = 0.35,
                  cooldown: float = 0.6) -> None:
         self.min_dx = min_dx
         self.window = window
@@ -128,30 +177,151 @@ class SwipeDetector:
         self._hist = []
 
 
-class TapDetector:
-    """Detects a double-tap from a stream of (distance, t): two quick 'closes'
-    (distance dips below `close` then rises above `open_`) within `max_gap`."""
+class OneEuro:
+    """One-Euro filter (Casiez et al.): strong smoothing when the hand is still
+    (kills jitter), little lag when it moves fast (keeps swipes responsive)."""
 
-    def __init__(self, close: float = 0.05, open_: float = 0.09,
-                 max_gap: float = 0.6) -> None:
-        self.close = close
-        self.open = open_
-        self.max_gap = max_gap
-        self._closed = False
-        self._last_tap = -1.0
+    def __init__(self, min_cutoff: float = 2.0, beta: float = 4.0,
+                 d_cutoff: float = 1.0) -> None:
+        self.min_cutoff, self.beta, self.d_cutoff = min_cutoff, beta, d_cutoff
+        self._x: float | None = None
+        self._dx = 0.0
+        self._t = 0.0
+
+    @staticmethod
+    def _alpha(dt: float, cutoff: float) -> float:
+        tau = 1.0 / (2 * 3.141592653589793 * cutoff)
+        return 1.0 / (1.0 + tau / dt)
+
+    def __call__(self, x: float, t: float) -> float:
+        if self._x is None:
+            self._x, self._t = x, t
+            return x
+        dt = max(t - self._t, 1e-3)
+        dx = (x - self._x) / dt
+        self._dx += self._alpha(dt, self.d_cutoff) * (dx - self._dx)
+        cutoff = self.min_cutoff + self.beta * abs(self._dx)
+        self._x += self._alpha(dt, cutoff) * (x - self._x)
+        self._t = t
+        return self._x
+
+
+class HandSmoother:
+    """Per-hand landmark smoothing + dropout bridging.
+
+    Each hand's 63 coordinates go through a One-Euro filter. If a hand vanishes
+    for up to `hold` s (a dropped detection), its last pose is kept so an
+    in-progress pinch or drag doesn't break."""
+
+    def __init__(self, hold: float = 0.2) -> None:
+        self.hold = hold
+        self._filters: dict[str, list[OneEuro]] = {}
+        self._last: dict[str, tuple[float, list]] = {}
+
+    def update(self, hands: dict, t: float) -> dict:
+        out = {}
+        for label, lm in hands.items():
+            fs = self._filters.setdefault(label, [OneEuro() for _ in range(63)])
+            flat = [fs[i](v, t) for i, v in enumerate(c for p in lm for c in p)]
+            out[label] = [tuple(flat[i:i + 3]) for i in range(0, 63, 3)]
+            self._last[label] = (t, out[label])
+        for label, (seen, lm) in list(self._last.items()):
+            if label in out:
+                continue
+            if t - seen <= self.hold:
+                out[label] = lm
+            else:
+                del self._last[label]
+                self._filters.pop(label, None)
+        return out
+
+
+class HandLabeler:
+    """assign_hands() plus stickiness: a single hand that stays in place keeps
+    its label instead of flickering between Left and Right."""
+
+    def __init__(self, swap: bool = False, near: float = 0.12,
+                 memory: float = 0.6) -> None:
+        self.swap, self.near, self.memory = swap, near, memory
+        self._seen: dict[str, tuple[float, float]] = {}   # label -> (x, t)
+
+    def _recent_near(self, label: str, x: float, t: float) -> bool:
+        p = self._seen.get(label)
+        return p is not None and abs(p[0] - x) < self.near and t - p[1] < self.memory
+
+    def __call__(self, detected: list[tuple[str, list]], t: float) -> dict:
+        out = assign_hands(detected, swap=self.swap)
+        if len(out) == 1:
+            (label, lm), = out.items()
+            x, other = hand_x(lm), _OTHER[label]
+            if self._recent_near(other, x, t) and not self._recent_near(label, x, t):
+                out = {other: lm}
+        for label, lm in out.items():
+            self._seen[label] = (hand_x(lm), t)
+        return out
+
+
+class PinchGesture:
+    """Thumb-to-finger pinch for one hand: double-tap and pinch-hold-drag.
+
+    A pinch is the thumb tip touching the index or middle fingertip — any pose
+    of the other fingers is fine (an 'OK' sign counts). Ratios are in hand-size
+    units, so distance from the camera doesn't matter.
+
+    Events returned by update():
+      ("double", finger)            two brief pinches within MAX_GAP s
+      ("drag_start", finger)        pinch held for HOLD s -> start dragging
+      ("drag", finger, dy)          while held: hand moved dy up (screen units)
+      ("drag_end", finger)          released after dragging
+    """
+
+    CLOSE, OPEN = 0.30, 0.50         # touch / release (hysteresis)
+    MAX_TAP, MAX_GAP = 0.30, 0.50    # s: max tap length, max gap between taps
+    HOLD = 0.30                      # s: pinch held this long becomes a drag
+
+    def __init__(self) -> None:
+        self.closed = False
+        self.finger: str | None = None
+        self.dragging = False
+        self._close_t = 0.0
+        self._start_y = 0.0
         self._taps = 0
+        self._tap_finger: str | None = None
+        self._last_release = -9.0
 
-    def update(self, distance: float, t: float) -> bool:
-        if not self._closed and distance < self.close:
-            self._closed = True
-            self._taps = self._taps + 1 if (t - self._last_tap) <= self.max_gap else 1
-            self._last_tap = t
-            if self._taps >= 2:
+    def update(self, ri: float, rm: float, y: float, t: float) -> list[tuple]:
+        ev: list[tuple] = []
+        if not self.closed:
+            r, finger = (ri, "index") if ri <= rm else (rm, "middle")
+            if r < self.CLOSE:
+                self.closed, self.finger, self.dragging = True, finger, False
+                self._close_t = t
+            return ev
+
+        f = self.finger
+        if (ri if f == "index" else rm) > self.OPEN:          # released
+            self.closed = False
+            if self.dragging:
+                self.dragging = False
+                ev.append(("drag_end", f))
+            elif t - self._close_t <= self.MAX_TAP:             # a tap
+                quick = (t - self._last_release <= self.MAX_GAP
+                         and self._tap_finger == f)
+                self._taps = self._taps + 1 if quick else 1
+                self._tap_finger, self._last_release = f, t
+                if self._taps >= 2:
+                    self._taps = 0
+                    ev.append(("double", f))
+            else:                                               # held, no drag
                 self._taps = 0
-                return True
-        elif self._closed and distance > self.open:
-            self._closed = False
-        return False
+        else:                                                   # still pinched
+            if not self.dragging and t - self._close_t >= self.HOLD:
+                self.dragging, self._start_y = True, y
+                self._taps = 0
+                ev.append(("drag_start", f))
+            if self.dragging:
+                ev.append(("drag", f, self._start_y - y))
+        return ev
 
 
 @dataclass
@@ -161,6 +331,8 @@ class GestureOptions:
     preview: bool = True
     swap_hands: bool = False
     bulb_rate: int = 12
+    debug: bool = False
+    record: str | None = None     # JSONL file of per-frame measurements
 
 
 @dataclass
@@ -212,6 +384,12 @@ class GestureController:
             if self.s.on[i]:
                 self._send_rate_limited(i)
 
+    def brightness(self, index: int | None) -> float:
+        """Current brightness of one bulb, or the average of all."""
+        if index is None:
+            return sum(h[2] for h in self.s.hsv) / len(self.s.hsv)
+        return self.s.hsv[index][2]
+
     def switch_selected(self, direction: int) -> int:
         self.s.selected = (self.s.selected + direction) % len(self.bulbs)
         return self.s.selected
@@ -233,6 +411,13 @@ class GestureController:
                 self._send(i)
             else:
                 _bg(self.bulbs[i].off)
+
+    def commit(self, index: int | None) -> None:
+        """Send the current state now, bypassing the rate limit (end of a drag)."""
+        targets = range(len(self.bulbs)) if index is None else [index]
+        for i in targets:
+            if self.s.on[i]:
+                self._send(i)
 
     def toggle(self, index: int | None) -> bool:
         """Toggle one bulb, or all (all -> off if any on, else all on). Returns new state."""
@@ -312,20 +497,21 @@ def run(opts: GestureOptions) -> int:
     ))
     connections = vision.HandLandmarksConnections.HAND_CONNECTIONS
     t0 = time.monotonic()
+    last_logged = ""
     swipe = {"Right": SwipeDetector(), "Left": SwipeDetector()}
-    tap_index = TapDetector()      # thumb+index double-tap -> toggle selected
-    tap_middle = TapDetector()     # thumb+middle double-tap -> toggle all
-    suppress_brightness_until = 0.0
-
-    def handed(label: str) -> str:
-        if opts.swap_hands:
-            return "Left" if label == "Right" else "Right"
-        return label
+    pinch = {"Right": PinchGesture(), "Left": PinchGesture()}
+    labeler = HandLabeler(swap=opts.swap_hands)
+    smoother = HandSmoother()
+    drag_base: dict[str, float] = {}
+    last_sent = -1.0
+    next_debug = 0.0
+    DRAG_GAIN = 2.0   # moving the hand half the screen height = full range
+    rec = open(opts.record, "a", buffering=1) if opts.record else None  # line-buffered
 
     print("Gesture control running.  (q to quit)")
-    print("  R thumb+index : hold/spread = brightness,  double-tap = toggle bulb")
-    print("  R thumb+middle: hold/spread = ALL brightness, double-tap = toggle ALL")
-    print("  R open-palm swipe = switch bulb      L open-palm swipe = color")
+    print("  pinch thumb+index : double-tap = toggle bulb,  pinch-hold + move up/down = brightness")
+    print("  pinch thumb+middle: double-tap = toggle ALL,   pinch-hold + move up/down = ALL brightness")
+    print("  RIGHT open hand flick = switch bulb    LEFT open hand flick = color")
     try:
         while True:
             ok, frame = cap.read()
@@ -337,56 +523,102 @@ def run(opts: GestureOptions) -> int:
             res = hands.detect_for_video(
                 mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), ts)
             now = time.time()
-            status = f"bulb {ctrl.s.selected + 1}/{len(ctrl.bulbs)}  {COLORS[ctrl.s.color_idx][0]}"
+            idle_status = f"bulb {ctrl.s.selected + 1}/{len(ctrl.bulbs)}  {COLORS[ctrl.s.color_idx][0]}"
+            status = idle_status
 
-            hands_lm = {}
-            for h_lm, h_cls in zip(res.hand_landmarks or [], res.handedness or []):
-                lm = [(p.x, p.y, p.z) for p in h_lm]
-                label = handed(h_cls[0].category_name)
-                hands_lm[label] = lm
-                if opts.preview:
+            detected = [(h_cls[0].category_name, [(p.x, p.y, p.z) for p in h_lm])
+                        for h_lm, h_cls in zip(res.hand_landmarks or [],
+                                               res.handedness or [])]
+            hands_lm = smoother.update(labeler(detected, now), now)
+            if opts.preview:
+                for label, lm in hands_lm.items():
                     _draw_hand(cv2, frame, lm, connections)
+                    hgt, wid = frame.shape[:2]
+                    cv2.putText(frame, label.upper(),
+                                (int(lm[0][0] * wid) - 30, int(lm[0][1] * hgt) + 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 200, 0), 2)
 
+            debug_parts = []
+            bar = None   # (label, level) to draw while dragging
+            frame_rec = {}
             for label, lm in hands_lm.items():
                 st = finger_states(lm)
-                if label == "Right":
-                    di = pinch_distance(lm)         # thumb-index gap
-                    dm = _dist(lm[4], lm[12])        # thumb-middle gap
-                    if is_pinch_index_pose(st) and tap_index.update(di, now):
-                        on = ctrl.toggle(ctrl.s.selected)
-                        suppress_brightness_until = now + 0.6
-                        status = f"bulb {ctrl.s.selected+1} {'ON' if on else 'OFF'}"
-                    elif is_pinch_middle_pose(st) and tap_middle.update(dm, now):
-                        on = ctrl.toggle(None)
-                        suppress_brightness_until = now + 0.6
-                        status = f"ALL {'ON' if on else 'OFF'}"
-                    elif is_pinch_index_pose(st):
-                        swipe["Right"].reset()
-                        if now >= suppress_brightness_until:
-                            v = (di - 0.03) / 0.22
-                            ctrl.set_selected_brightness(v)
-                            status = f"bulb {ctrl.s.selected+1} bright {int(max(0.05,min(1,v))*100)}%"
-                    elif is_pinch_middle_pose(st):
-                        swipe["Right"].reset()
-                        if now >= suppress_brightness_until:
-                            v = (dm - 0.03) / 0.22
-                            ctrl.set_all_brightness(v)
-                            status = f"ALL bright {int(max(0.05,min(1,v))*100)}%"
-                    elif is_open_palm(st):
-                        d = swipe["Right"].update(hand_x(lm), now)
-                        if d:
-                            ctrl.switch_selected(1 if d == "right" else -1)
-                            status = f"switched -> bulb {ctrl.s.selected+1}"
-                else:  # Left hand -> color cycle
-                    if is_open_palm(st):
-                        d = swipe["Left"].update(hand_x(lm), now)
-                        if d:
-                            c = ctrl.cycle_color(1 if d == "right" else -1)
-                            status = f"color -> {c}"
+                ri, rm = pinch_ratio(lm, 8), pinch_ratio(lm, 12)
+                ext = "".join(c if s else "." for c, s in zip("TIMRP", st))
+                g = pinch[label]
+                frame_rec[label] = {"ri": round(ri, 3), "rm": round(rm, 3),
+                                    "x": round(hand_x(lm), 3),
+                                    "y": round(lm[9][1], 3), "ext": ext}
+
+                for ev in g.update(ri, rm, lm[9][1], now):
+                    kind, f = ev[0], ev[1]
+                    target = ctrl.s.selected if f == "index" else None
+                    name = f"bulb {ctrl.s.selected + 1}" if target is not None else "ALL"
+                    if kind == "double":
+                        on = ctrl.toggle(target)
+                        status = f"{name} {'ON' if on else 'OFF'}"
+                    elif kind == "drag_start":
+                        drag_base[label] = ctrl.brightness(target)
+                        last_sent = -1.0
+                        status = f"{name} dimmer: move hand up/down"
+                    elif kind == "drag":
+                        v = max(0.05, min(1.0, drag_base[label] + DRAG_GAIN * ev[2]))
+                        if abs(v - last_sent) >= 0.02:
+                            last_sent = v
+                            if target is not None:
+                                ctrl.set_selected_brightness(v)
+                            else:
+                                ctrl.set_all_brightness(v)
+                            status = f"{name} bright {int(v * 100)}%"
+                        bar = (name, v)
+                    elif kind == "drag_end":
+                        ctrl.commit(target)   # make sure the final value lands
+                        status = f"{name} bright set {int(ctrl.brightness(target) * 100)}%"
+
+                # Swipe: position tracked every frame (blur can't reset it);
+                # fires only with the hand open-ish and not pinching.
+                d = swipe[label].update(hand_x(lm), now)
+                if d and not g.closed and sum(st[1:]) >= 2:
+                    step = 1 if d == "right" else -1
+                    if label == "Right":
+                        ctrl.switch_selected(step)
+                        status = f"switched -> bulb {ctrl.s.selected + 1}"
+                    else:
+                        status = f"color -> {ctrl.cycle_color(step)}"
+
+                mode = (f"drag-{g.finger}" if g.dragging
+                        else f"pinch-{g.finger}" if g.closed else "free")
+                debug_parts.append(f"{label[0]} {ext} ri={ri:.2f} rm={rm:.2f} "
+                                   f"x={hand_x(lm):.2f} {mode}")
+
+            if rec is not None:
+                rec.write(json.dumps({"t": round(now, 3), "hands": frame_rec,
+                                      "event": status if status != idle_status else None})
+                          + "\n")
+
+            if opts.preview and bar is not None:
+                hgt, wid = frame.shape[:2]
+                x0, y0, y1 = wid - 50, int(hgt * 0.15), int(hgt * 0.85)
+                cv2.rectangle(frame, (x0, y0), (x0 + 24, y1), (80, 80, 80), 2)
+                fill = int(y1 - (y1 - y0) * bar[1])
+                cv2.rectangle(frame, (x0 + 3, fill), (x0 + 21, y1 - 3), (0, 220, 255), -1)
+                cv2.putText(frame, f"{int(bar[1] * 100)}%", (x0 - 20, y0 - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 220, 255), 2)
+
+            if opts.debug and now >= next_debug:
+                next_debug = now + 0.25
+                print("  dbg " + (" | ".join(debug_parts) or "no hands"), flush=True)
+
+            if status != idle_status and status != last_logged:
+                print(f"  {status}", flush=True)
+            last_logged = status if status != idle_status else last_logged
 
             if opts.preview:
                 cv2.putText(frame, status, (10, 44), cv2.FONT_HERSHEY_SIMPLEX,
                             0.9, (0, 255, 0), 2)
+                for k, part in enumerate(debug_parts):
+                    cv2.putText(frame, part, (10, 80 + 28 * k),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 220, 255), 2)
                 cv2.imshow("ambibulb gesture (q to quit)", frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
@@ -397,6 +629,8 @@ def run(opts: GestureOptions) -> int:
         if opts.preview:
             cv2.destroyAllWindows()
         hands.close()
+        if rec is not None:
+            rec.close()
         for b in ctrl.bulbs:
             b.stop()
     return 0
