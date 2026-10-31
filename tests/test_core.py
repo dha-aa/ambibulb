@@ -287,27 +287,36 @@ def _run_pinch(seq, fps=30):
     return evs
 
 
-def test_pinch_double_tap_index():
+def test_pinch_double_tap():
     evs = _run_pinch([(1.0, 1.2, .5, .3), (.1, .9, .5, .12), (1.0, 1.2, .5, .15),
                       (.1, .9, .5, .12), (1.0, 1.2, .5, .3)])
-    assert [e for e in evs if e[0] == "double"] == [("double", "index")]
+    assert [e for e in evs if e[0] == "double"] == [("double",)]
 
 
-def test_pinch_double_tap_middle_with_ok_sign_style():
-    # middle touches the thumb; index stays far (any finger posture allowed)
-    evs = _run_pinch([(1.0, 1.0, .5, .3), (.9, .1, .5, .12), (1.0, 1.0, .5, .15),
-                      (.9, .1, .5, .12), (1.0, 1.0, .5, .3)])
-    assert [e for e in evs if e[0] == "double"] == [("double", "middle")]
+def test_pinch_double_tap_counts_even_if_finger_reading_flips():
+    # Recorded behaviour: fingers bunch up, so tap 1 reads as index and tap 2
+    # as middle. It must still be one double-tap.
+    evs = _run_pinch([(1.0, 1.0, .5, .3), (.1, .9, .5, .2), (1.0, 1.0, .5, .2),
+                      (.9, .1, .5, .2), (1.0, 1.0, .5, .3)])
+    assert [e for e in evs if e[0] == "double"] == [("double",)]
+
+
+def test_pinch_one_frame_jitter_does_not_split_a_hold():
+    # a held pinch with a single noisy frame above OPEN stays one drag
+    evs = _run_pinch([(1.0, 1.2, .5, .3), (.1, .9, .5, .6), (.6, .9, .5, 1 / 30),
+                      (.1, .9, .4, .5), (1.0, 1.2, .4, .3)])
+    kinds = [e[0] for e in evs]
+    assert kinds.count("drag_start") == 1 and kinds.count("drag_end") == 1
 
 
 def test_pinch_hold_becomes_drag_not_tap():
-    evs = _run_pinch([(1.0, 1.2, .50, .3), (.1, .9, .50, .4),   # hold -> drag
+    evs = _run_pinch([(1.0, 1.2, .50, .3), (.1, .9, .50, .6),   # hold -> drag
                       (.1, .9, .30, .3),                        # move hand up
                       (1.0, 1.2, .30, .2)])                     # release
     kinds = [e[0] for e in evs]
     assert "double" not in kinds
     assert kinds.count("drag_start") == 1 and kinds.count("drag_end") == 1
-    drags = [e[2] for e in evs if e[0] == "drag"]
+    drags = [e[1] for e in evs if e[0] == "drag"]
     assert drags[-1] > 0.15            # moved up by ~0.2 screen units
 
 
@@ -356,3 +365,46 @@ def test_assign_hands_drops_duplicate_detection():
     assert len(out) == 1
     # genuinely two hands far apart -> both kept
     assert len(assign_hands([("Left", hand(0.3)), ("Right", hand(0.75))])) == 2
+
+
+class _FakeBulb:
+    def __init__(self):
+        self.calls = []
+    def apply_hsv(self, h, s, v):
+        self.calls.append(("hsv", h, s, v))
+    def off(self):
+        self.calls.append(("off",))
+
+
+def _ctrl(n=3):
+    from ambibulb.gesture import GestureController
+    return GestureController([_FakeBulb() for _ in range(n)])
+
+
+def test_selection_starts_on_all_and_cycles():
+    c = _ctrl()
+    assert c.s.selected is None                       # ALL by default
+    order = [c.switch_selected(1) for _ in range(4)]
+    assert order == [0, 1, 2, None]                   # bulb1, bulb2, bulb3, ALL
+    assert c.switch_selected(-1) == 2                 # backwards wraps
+
+
+def test_actions_apply_to_selection():
+    c = _ctrl()
+    c.set_brightness(c.s.selected, 0.4)               # ALL
+    assert [h[2] for h in c.s.hsv] == [0.4, 0.4, 0.4]
+    c.s.selected = 1                                  # just bulb 2
+    c.set_brightness(c.s.selected, 0.9)
+    assert [h[2] for h in c.s.hsv] == [0.4, 0.9, 0.4]
+    c.cycle_color(1)
+    hues = [h[:2] for h in c.s.hsv]
+    assert hues[1] != hues[0] and hues[0] == hues[2]  # only bulb 2 recoloured
+
+
+def test_toggle_selection_and_all():
+    c = _ctrl()
+    assert c.toggle(None) is False and c.s.on == [False, False, False]
+    assert c.toggle(0) is True and c.s.on == [True, False, False]
+    assert c.toggle(None) is False                    # any on -> all off
+    assert c.s.on == [False, False, False]
+    assert c.name(None) == "ALL" and c.name(2) == "bulb 3"

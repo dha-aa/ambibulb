@@ -250,19 +250,21 @@ The hand-tracking model (~7.5 MB) downloads automatically on first run to
 `~/.cache/ambibulb/`. Your terminal app needs **Camera** access
 (System Settings → Privacy & Security → Camera).
 
-| Hand | Gesture | Action |
-|---|---|---|
-| Right | thumb+index — hold & spread | **brightness** of selected bulb |
-| Right | thumb+index — **double-tap** | toggle selected bulb **on/off** |
-| Right | thumb+middle — hold & spread | **brightness of all** bulbs |
-| Right | thumb+middle — **double-tap** | toggle **all** bulbs on/off |
-| Right | open-palm **swipe** L/R | **switch** which bulb is selected |
-| Left | open-palm **swipe** L/R | **cycle color** (warm/cool/red/green/blue/white) |
+You have a **selection** that starts as **ALL bulbs**. Every gesture acts on
+the selection, so by default everything drives all bulbs together.
 
-A held, spread pinch sets brightness; a quick double-tap toggles power — they
-don't collide. A preview window shows the live state (selected bulb, color,
-brightness). Press `q` to quit, `--no-preview` for headless, `--swap-hands` if
-left/right read reversed. macOS asks for **Camera permission** on first run.
+| Gesture | Action |
+|---|---|
+| **Right** open hand, quick flick left/right | select **ALL → bulb 1 → bulb 2 → bulb 3 → ALL** (a single bulb flashes when selected) |
+| Pinch (thumb tip to index/middle tip), **double-tap** | toggle the selection **on/off** |
+| Pinch, **hold** ~½ s, then move hand **up/down** | **brightness** of the selection (a bar shows the level) |
+| **Left** open hand, quick flick left/right | cycle **color** of the selection (warm/cool/red/green/blue/white) |
+
+A pinch works in any finger posture (an 👌 counts) and with either hand. Hand
+landmarks are smoothed (One-Euro filter), brief tracking dropouts are bridged,
+and duplicate detections are dropped. Press `q` to quit, `--no-preview` for
+headless, `--swap-hands` if left/right read reversed, `--debug` to show the raw
+measurements, and `--record FILE` to log every frame for tuning. macOS asks for **Camera permission** on first run.
 
 ## HomeKit & Siri
 

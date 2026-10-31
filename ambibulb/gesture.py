@@ -6,15 +6,16 @@ Optional feature. Install the extra deps with:
 
 Gesture scheme (a small preview window shows the live state):
 
-  pinch thumb+index,  double-tap            -> toggle SELECTED bulb on/off
-  pinch thumb+index,  hold + move up/down   -> brightness of SELECTED bulb
-  pinch thumb+middle, double-tap            -> toggle ALL bulbs on/off
-  pinch thumb+middle, hold + move up/down   -> brightness of ALL bulbs
-  RIGHT open hand, quick flick left/right   -> switch which bulb is selected
-  LEFT  open hand, quick flick left/right   -> cycle color (warm/cool/R/G/B/white)
+  RIGHT open hand, quick flick left/right   -> select: ALL -> bulb 1 -> 2 -> 3 -> ALL
+                                               (a single bulb flashes when selected)
+  pinch (thumb to fingertip), double-tap    -> toggle SELECTION on/off
+  pinch, hold + move hand up/down           -> brightness of SELECTION
+  LEFT  open hand, quick flick left/right   -> cycle color of SELECTION
 
-A pinch is the thumb tip touching the fingertip; the other fingers can be in
-any position (an 'OK' sign works). Pinches work with either hand. Landmarks
+The selection starts as ALL, so out of the box every gesture drives all bulbs.
+
+A pinch is the thumb tip touching the index or middle fingertip; the other
+fingers can be in any position (an 'OK' sign works). Pinches work with either hand. Landmarks
 are One-Euro filtered and brief detection dropouts are bridged. macOS asks for
 Camera permission on first run; use --swap-hands if left/right read reversed.
 """
@@ -84,11 +85,6 @@ def count_fingers(lm) -> int:
     return sum(finger_states(lm))
 
 
-def pinch_distance(lm) -> float:
-    """Normalized gap between thumb tip (4) and index tip (8)."""
-    if not lm or len(lm) < 21:
-        return 0.0
-    return _dist(lm[4], lm[8])
 
 
 def hand_x(lm) -> float:
@@ -104,19 +100,10 @@ def is_open_palm(st) -> bool:
     return st[1] and st[2] and st[3] and st[4]
 
 
-def is_thumbs_up(lm, st) -> bool:
-    # Thumb extended, other four curled, thumb pointing up (tip above wrist).
-    return st[0] and not any(st[1:]) and lm[4][1] < lm[0][1] - 0.1
 
 
-def is_pinch_index_pose(st) -> bool:
-    # Index extended, middle/ring/pinky curled (thumb+index pinch).
-    return st[1] and not st[2] and not st[3] and not st[4]
 
 
-def is_pinch_middle_pose(st) -> bool:
-    # Middle extended, index/ring/pinky curled (thumb+middle pinch).
-    return st[2] and not st[1] and not st[3] and not st[4]
 
 
 _OTHER = {"Left": "Right", "Right": "Left"}
@@ -262,65 +249,66 @@ class HandLabeler:
 
 
 class PinchGesture:
-    """Thumb-to-finger pinch for one hand: double-tap and pinch-hold-drag.
+    """Thumb-to-fingertip pinch for one hand: double-tap and pinch-hold-drag.
 
-    A pinch is the thumb tip touching the index or middle fingertip — any pose
-    of the other fingers is fine (an 'OK' sign counts). Ratios are in hand-size
-    units, so distance from the camera doesn't matter.
+    A pinch is the thumb tip touching the index OR middle fingertip — whichever
+    is closer, in any posture of the other fingers (an 'OK' sign counts). When
+    you pinch, the fingers bunch up and the thumb is often equally close to
+    both, so the finger is deliberately NOT distinguished. Ratios are in
+    hand-size units, so distance from the camera doesn't matter.
 
     Events returned by update():
-      ("double", finger)            two brief pinches within MAX_GAP s
-      ("drag_start", finger)        pinch held for HOLD s -> start dragging
-      ("drag", finger, dy)          while held: hand moved dy up (screen units)
-      ("drag_end", finger)          released after dragging
+      ("double",)          two brief pinches within MAX_GAP s
+      ("drag_start",)      pinch held for HOLD s -> start dragging
+      ("drag", dy)         while held: hand moved dy up (screen units)
+      ("drag_end",)        released after dragging
     """
 
-    CLOSE, OPEN = 0.30, 0.50         # touch / release (hysteresis)
-    MAX_TAP, MAX_GAP = 0.30, 0.50    # s: max tap length, max gap between taps
-    HOLD = 0.30                      # s: pinch held this long becomes a drag
+    CLOSE, OPEN = 0.30, 0.50        # touch / release (hysteresis)
+    MAX_TAP, MAX_GAP = 0.42, 0.60   # s: tuned on recorded taps (0.1-0.4 s long)
+    HOLD = 0.45                     # s: a pinch held longer becomes a drag
+    RELEASE_FRAMES = 2              # a release must last this many frames
+                                    # (1-frame jitter used to split a held pinch)
 
     def __init__(self) -> None:
         self.closed = False
-        self.finger: str | None = None
+        self._open_frames = 0
         self.dragging = False
         self._close_t = 0.0
         self._start_y = 0.0
         self._taps = 0
-        self._tap_finger: str | None = None
         self._last_release = -9.0
 
     def update(self, ri: float, rm: float, y: float, t: float) -> list[tuple]:
         ev: list[tuple] = []
+        r = min(ri, rm)
         if not self.closed:
-            r, finger = (ri, "index") if ri <= rm else (rm, "middle")
             if r < self.CLOSE:
-                self.closed, self.finger, self.dragging = True, finger, False
-                self._close_t = t
+                self.closed, self.dragging, self._close_t = True, False, t
             return ev
 
-        f = self.finger
-        if (ri if f == "index" else rm) > self.OPEN:          # released
-            self.closed = False
+        self._open_frames = self._open_frames + 1 if r > self.OPEN else 0
+        if self._open_frames >= self.RELEASE_FRAMES:            # released
+            self.closed, self._open_frames = False, 0
             if self.dragging:
                 self.dragging = False
-                ev.append(("drag_end", f))
+                ev.append(("drag_end",))
             elif t - self._close_t <= self.MAX_TAP:             # a tap
-                quick = (t - self._last_release <= self.MAX_GAP
-                         and self._tap_finger == f)
+                quick = t - self._last_release <= self.MAX_GAP
                 self._taps = self._taps + 1 if quick else 1
-                self._tap_finger, self._last_release = f, t
+                self._last_release = t
                 if self._taps >= 2:
                     self._taps = 0
-                    ev.append(("double", f))
+                    ev.append(("double",))
             else:                                               # held, no drag
                 self._taps = 0
         else:                                                   # still pinched
             if not self.dragging and t - self._close_t >= self.HOLD:
                 self.dragging, self._start_y = True, y
                 self._taps = 0
-                ev.append(("drag_start", f))
+                ev.append(("drag_start",))
             if self.dragging:
-                ev.append(("drag", f, self._start_y - y))
+                ev.append(("drag", self._start_y - y))
         return ev
 
 
@@ -339,7 +327,7 @@ class GestureOptions:
 class _State:
     hsv: list[list[float]]
     on: list[bool]
-    selected: int = 0
+    selected: int | None = None     # None = ALL bulbs (the default)
     color_idx: int = 0
     last_apply: list[float] = field(default_factory=list)
 
@@ -349,7 +337,10 @@ def _bg(fn, *args):
 
 
 class GestureController:
-    """Holds bulb state and turns gesture events into bulb commands."""
+    """Holds bulb state and turns gesture events into bulb commands.
+
+    The selection is either ALL bulbs (None) or one bulb index. Every action
+    that takes an `index` treats None as "all bulbs"."""
 
     MIN_INTERVAL = 0.09  # s between continuous (brightness) sends per bulb
 
@@ -359,7 +350,13 @@ class GestureController:
         self.s = _State(hsv=[[0.0, 0.0, 1.0] for _ in range(n)],
                         on=[True] * n, last_apply=[0.0] * n)
 
-    # -- low level ---------------------------------------------------------- #
+    # -- helpers ------------------------------------------------------------ #
+    def targets(self, index: int | None) -> list[int]:
+        return list(range(len(self.bulbs))) if index is None else [index]
+
+    def name(self, index: int | None) -> str:
+        return "ALL" if index is None else f"bulb {index + 1}"
+
     def _send(self, i: int) -> None:
         h, sat, v = self.s.hsv[i]
         _bg(self.bulbs[i].apply_hsv, h, sat, v)
@@ -370,42 +367,60 @@ class GestureController:
             self.s.last_apply[i] = now
             self._send(i)
 
-    # -- events ------------------------------------------------------------- #
-    def set_selected_brightness(self, v: float) -> None:
-        i = self.s.selected
-        self.s.hsv[i][2] = max(0.05, min(1.0, v))
-        if self.s.on[i]:
-            self._send_rate_limited(i)
+    # -- selection ---------------------------------------------------------- #
+    def switch_selected(self, direction: int) -> int | None:
+        """Cycle ALL -> bulb 1 -> ... -> bulb N -> ALL."""
+        options: list[int | None] = [None, *range(len(self.bulbs))]
+        k = options.index(self.s.selected)
+        self.s.selected = options[(k + direction) % len(options)]
+        if self.s.selected is not None:
+            self.highlight(self.s.selected)
+        return self.s.selected
 
-    def set_all_brightness(self, v: float) -> None:
+    def highlight(self, i: int, seconds: float = 0.35) -> None:
+        """Briefly flash bulb i bright white so you can see which one is selected,
+        then restore its colour (or switch it back off)."""
+        def work():
+            b = self.bulbs[i]
+            b.apply_hsv(0.0, 0.0, 1.0)
+            time.sleep(seconds)
+            if self.s.on[i]:
+                b.apply_hsv(*self.s.hsv[i])
+            else:
+                b.off()
+        _bg(work)
+
+    # -- actions ------------------------------------------------------------ #
+    def set_brightness(self, index: int | None, v: float) -> None:
         v = max(0.05, min(1.0, v))
-        for i in range(len(self.bulbs)):
+        for i in self.targets(index):
             self.s.hsv[i][2] = v
             if self.s.on[i]:
                 self._send_rate_limited(i)
 
-    def brightness(self, index: int | None) -> float:
-        """Current brightness of one bulb, or the average of all."""
-        if index is None:
-            return sum(h[2] for h in self.s.hsv) / len(self.s.hsv)
-        return self.s.hsv[index][2]
+    def set_selected_brightness(self, v: float) -> None:
+        self.set_brightness(self.s.selected, v)
 
-    def switch_selected(self, direction: int) -> int:
-        self.s.selected = (self.s.selected + direction) % len(self.bulbs)
-        return self.s.selected
+    def set_all_brightness(self, v: float) -> None:
+        self.set_brightness(None, v)
+
+    def brightness(self, index: int | None) -> float:
+        """Current brightness of one bulb, or the average of the targets."""
+        ts = self.targets(index)
+        return sum(self.s.hsv[i][2] for i in ts) / len(ts)
 
     def cycle_color(self, direction: int) -> str:
+        """Next/previous colour, applied to the current selection."""
         self.s.color_idx = (self.s.color_idx + direction) % len(COLORS)
         label, (h, sat) = COLORS[self.s.color_idx]
-        i = self.s.selected
-        self.s.hsv[i][0], self.s.hsv[i][1] = h, sat
-        if self.s.on[i]:
-            self._send(i)
+        for i in self.targets(self.s.selected):
+            self.s.hsv[i][0], self.s.hsv[i][1] = h, sat
+            if self.s.on[i]:
+                self._send(i)
         return label
 
     def power(self, index: int | None, on: bool) -> None:
-        targets = range(len(self.bulbs)) if index is None else [index]
-        for i in targets:
+        for i in self.targets(index):
             self.s.on[i] = on
             if on:
                 self._send(i)
@@ -414,18 +429,14 @@ class GestureController:
 
     def commit(self, index: int | None) -> None:
         """Send the current state now, bypassing the rate limit (end of a drag)."""
-        targets = range(len(self.bulbs)) if index is None else [index]
-        for i in targets:
+        for i in self.targets(index):
             if self.s.on[i]:
                 self._send(i)
 
     def toggle(self, index: int | None) -> bool:
-        """Toggle one bulb, or all (all -> off if any on, else all on). Returns new state."""
-        if index is None:
-            new = not all(self.s.on)
-            self.power(None, new)
-            return new
-        new = not self.s.on[index]
+        """Toggle the target(s): if any is on -> all off, else all on.
+        Returns the new state."""
+        new = not any(self.s.on[i] for i in self.targets(index))
         self.power(index, new)
         return new
 
@@ -509,9 +520,9 @@ def run(opts: GestureOptions) -> int:
     rec = open(opts.record, "a", buffering=1) if opts.record else None  # line-buffered
 
     print("Gesture control running.  (q to quit)")
-    print("  pinch thumb+index : double-tap = toggle bulb,  pinch-hold + move up/down = brightness")
-    print("  pinch thumb+middle: double-tap = toggle ALL,   pinch-hold + move up/down = ALL brightness")
-    print("  RIGHT open hand flick = switch bulb    LEFT open hand flick = color")
+    print("  RIGHT open hand flick = select ALL -> bulb 1 -> 2 -> 3 (starts on ALL)")
+    print("  pinch thumb to fingertip: double-tap = on/off,  hold + move up/down = brightness")
+    print("  LEFT open hand flick = color")
     try:
         while True:
             ok, frame = cap.read()
@@ -523,7 +534,10 @@ def run(opts: GestureOptions) -> int:
             res = hands.detect_for_video(
                 mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), ts)
             now = time.time()
-            idle_status = f"bulb {ctrl.s.selected + 1}/{len(ctrl.bulbs)}  {COLORS[ctrl.s.color_idx][0]}"
+            sel = ctrl.s.selected
+            idle_status = (f"selected: {ctrl.name(sel)}"
+                           + ("" if sel is None else f"/{len(ctrl.bulbs)}")
+                           + f"  {COLORS[ctrl.s.color_idx][0]}")
             status = idle_status
 
             detected = [(h_cls[0].category_name, [(p.x, p.y, p.z) for p in h_lm])
@@ -551,9 +565,9 @@ def run(opts: GestureOptions) -> int:
                                     "y": round(lm[9][1], 3), "ext": ext}
 
                 for ev in g.update(ri, rm, lm[9][1], now):
-                    kind, f = ev[0], ev[1]
-                    target = ctrl.s.selected if f == "index" else None
-                    name = f"bulb {ctrl.s.selected + 1}" if target is not None else "ALL"
+                    kind = ev[0]
+                    target = ctrl.s.selected        # ALL (None) or one bulb
+                    name = ctrl.name(target)
                     if kind == "double":
                         on = ctrl.toggle(target)
                         status = f"{name} {'ON' if on else 'OFF'}"
@@ -562,13 +576,10 @@ def run(opts: GestureOptions) -> int:
                         last_sent = -1.0
                         status = f"{name} dimmer: move hand up/down"
                     elif kind == "drag":
-                        v = max(0.05, min(1.0, drag_base[label] + DRAG_GAIN * ev[2]))
+                        v = max(0.05, min(1.0, drag_base[label] + DRAG_GAIN * ev[1]))
                         if abs(v - last_sent) >= 0.02:
                             last_sent = v
-                            if target is not None:
-                                ctrl.set_selected_brightness(v)
-                            else:
-                                ctrl.set_all_brightness(v)
+                            ctrl.set_brightness(target, v)
                             status = f"{name} bright {int(v * 100)}%"
                         bar = (name, v)
                     elif kind == "drag_end":
@@ -581,13 +592,11 @@ def run(opts: GestureOptions) -> int:
                 if d and not g.closed and sum(st[1:]) >= 2:
                     step = 1 if d == "right" else -1
                     if label == "Right":
-                        ctrl.switch_selected(step)
-                        status = f"switched -> bulb {ctrl.s.selected + 1}"
+                        status = f"selected -> {ctrl.name(ctrl.switch_selected(step))}"
                     else:
                         status = f"color -> {ctrl.cycle_color(step)}"
 
-                mode = (f"drag-{g.finger}" if g.dragging
-                        else f"pinch-{g.finger}" if g.closed else "free")
+                mode = "drag" if g.dragging else "pinch" if g.closed else "free"
                 debug_parts.append(f"{label[0]} {ext} ri={ri:.2f} rm={rm:.2f} "
                                    f"x={hand_x(lm):.2f} {mode}")
 
