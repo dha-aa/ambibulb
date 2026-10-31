@@ -163,7 +163,6 @@ ambibulb studio                        # steady warm white (normal lighting, no 
 ambibulb studio --temp neutral --brightness 70   # neutral white at 70%
 ambibulb identify                      # blink each bulb in turn to see which is which
 ambibulb identify --name "Bedroom"     # blink just one bulb
-ambibulb gesture                       # control by hand gestures via the webcam
 ambibulb once                          # push the current color once (quick test)
 ambibulb discover                      # scan the LAN for Tuya devices
 python3 -m ambibulb run ...            # same, without the console script
@@ -234,37 +233,6 @@ because the bulbs are uncalibrated anyway, so the difference is subtle.
 ```bash
 ambibulb-follow --mode vivid       # on-screen panel that follows your screen color
 ```
-
-## Gesture control (webcam)
-
-Control the bulbs with **hand gestures** via your webcam (MediaPipe hand
-tracking). Optional feature:
-
-```bash
-EXTRAS=gesture ./setup.sh           # mediapipe + opencv (or: pip install "ambibulb[gesture]")
-MIRROR=huawei EXTRAS=gesture ./setup.sh   # if PyPI downloads crawl on your network
-ambibulb gesture                    # show your hands to the camera
-```
-
-The hand-tracking model (~7.5 MB) downloads automatically on first run to
-`~/.cache/ambibulb/`. Your terminal app needs **Camera** access
-(System Settings → Privacy & Security → Camera).
-
-You have a **selection** that starts as **ALL bulbs**. Every gesture acts on
-the selection, so by default everything drives all bulbs together.
-
-| Gesture | Action |
-|---|---|
-| **Right** open hand, quick flick left/right | select **ALL → bulb 1 → bulb 2 → bulb 3 → ALL** (a single bulb flashes when selected) |
-| Pinch (thumb tip to index/middle tip), **double-tap** | toggle the selection **on/off** |
-| Pinch, **hold** ~½ s, then move hand **up/down** | **brightness** of the selection (a bar shows the level) |
-| **Left** open hand, quick flick left/right | cycle **color** of the selection (warm/cool/red/green/blue/white) |
-
-A pinch works in any finger posture (an 👌 counts) and with either hand. Hand
-landmarks are smoothed (One-Euro filter), brief tracking dropouts are bridged,
-and duplicate detections are dropped. Press `q` to quit, `--no-preview` for
-headless, `--swap-hands` if left/right read reversed, `--debug` to show the raw
-measurements, and `--record FILE` to log every frame for tuning. macOS asks for **Camera permission** on first run.
 
 ## HomeKit & Siri
 

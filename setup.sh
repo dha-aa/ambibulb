@@ -14,7 +14,7 @@ cd "$HERE"
 echo "==> ambibulb setup"
 command -v python3 >/dev/null || { echo "  python3 is required: https://www.python.org"; exit 1; }
 
-# Optional extras, e.g.  EXTRAS=gesture ./setup.sh   (installs mediapipe + opencv)
+# Optional extras, e.g.  EXTRAS=dev ./setup.sh   (installs pytest)
 SPEC="."
 [ -n "${EXTRAS:-}" ] && SPEC=".[${EXTRAS}]"
 

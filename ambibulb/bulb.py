@@ -80,46 +80,6 @@ class Bulb:
                     time.sleep(0.5)
         return False
 
-    def apply_hsv(self, h: float, s: float, v: float) -> bool:
-        """One-shot: set colour by HSV (all 0..1), fire-and-forget. Retries once."""
-        for attempt in range(2):
-            try:
-                self._dev.turn_on()
-                self._dev.set_mode("colour")
-                self._dev.set_hsv(h, s, v, nowait=True)
-                return True
-            except Exception as exc:
-                log.warning("%s: hsv failed (%s)", self.name, exc)
-                if attempt == 0 and not self._rediscover():
-                    time.sleep(0.5)
-        return False
-
-    def apply_color(self, rgb: tuple[int, int, int]) -> bool:
-        """One-shot: set a solid RGB color (colour mode). Retries via rediscovery."""
-        for attempt in range(2):
-            try:
-                self._dev.turn_on()
-                self._dev.set_mode("colour")
-                self._dev.set_colour(*rgb)
-                return True
-            except Exception as exc:
-                log.warning("%s: color failed (%s)", self.name, exc)
-                if attempt == 0 and not self._rediscover():
-                    time.sleep(0.5)
-        return False
-
-    def off(self) -> bool:
-        """Turn the bulb off. Retries via rediscovery."""
-        for attempt in range(2):
-            try:
-                self._dev.turn_off()
-                return True
-            except Exception as exc:
-                log.warning("%s: off failed (%s)", self.name, exc)
-                if attempt == 0 and not self._rediscover():
-                    time.sleep(0.5)
-        return False
-
     def apply_white(self, brightness_pct: int = 100, temp_pct: int = 0) -> bool:
         """One-shot: put the bulb in white mode (temp_pct 0=warmest, 100=coolest).
 

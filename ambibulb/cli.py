@@ -57,22 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="Drive Wipro/Tuya smart bulbs from your screen color (local, no cloud).",
     )
     p.add_argument("command", nargs="?", default="run",
-                   choices=("run", "once", "discover", "studio", "identify",
-                            "gesture"),
-                   help="run (default), once, discover, studio, identify, or "
-                        "gesture (control by hand gestures via webcam)")
+                   choices=("run", "once", "discover", "studio", "identify"),
+                   help="run (default), once, discover, studio "
+                        "(steady warm white), or identify (blink each bulb)")
     p.add_argument("--name", default=None,
                    help="for `identify`: blink only the bulb with this name")
-    p.add_argument("--camera", type=int, default=0,
-                   help="for `gesture`: webcam index (default 0)")
-    p.add_argument("--swap-hands", action="store_true",
-                   help="for `gesture`: swap left/right if they read reversed")
-    p.add_argument("--debug", action="store_true",
-                   help="for `gesture`: log raw hand measurements for tuning")
-    p.add_argument("--record", default=None, metavar="FILE",
-                   help="for `gesture`: write every frame's measurements to a JSONL file")
-    p.add_argument("--no-preview", action="store_true",
-                   help="for `gesture`: run without the webcam preview window")
     p.add_argument("--version", action="version", version=f"ambibulb {__version__}")
     p.add_argument("-v", "--verbose", action="store_true", help="debug logging")
 
@@ -229,15 +218,6 @@ def cmd_identify(a: argparse.Namespace) -> int:
     return 0 if failed == 0 else 1
 
 
-def cmd_gesture(a: argparse.Namespace) -> int:
-    from .gesture import GestureOptions, run
-    return run(GestureOptions(
-        config=str(a.config), camera=a.camera, swap_hands=a.swap_hands,
-        debug=a.debug, record=a.record,
-        preview=not a.no_preview, bulb_rate=a.bulb_rate,
-    ))
-
-
 def cmd_once(a: argparse.Namespace) -> int:
     if a.mode in ("dominant", "vivid") and not color.HAVE_PIL:
         log.error("--mode dominant/vivid needs Pillow:  pip install pillow")
@@ -295,8 +275,6 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_studio(a)
         if a.command == "identify":
             return cmd_identify(a)
-        if a.command == "gesture":
-            return cmd_gesture(a)
         if a.command == "once":
             return cmd_once(a)
         return cmd_run(a)
